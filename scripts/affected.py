@@ -1,14 +1,6 @@
-"""Print the workspace crates a change affects, for the CI matrix.
+"""Print the crates a change affects and whether cargo-deny runs (#9).
 
 Usage: affected.py BASE_REF HEAD_REF
-
-Output (one line each, for $GITHUB_OUTPUT):
-    crates=<JSON list of package names>
-    deny=<true|false>
-
-A crate is affected when a file under its directory changed, or when it
-depends, directly or not, on an affected crate. Testing dependents as well
-catches breakage caused by a contract change in moldette-core.
 """
 
 import json
@@ -16,15 +8,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Changes to these paths can affect every crate, so all crates are checked.
-GLOBAL = ("Cargo.toml", "Cargo.lock", "deny.toml", "rust-toolchain.toml",
-          ".github/workflows/", "scripts/")
-# Changes to these paths alter the dependency graph, so cargo-deny runs.
-DEPENDENCY = ("Cargo.toml", "Cargo.lock", "deny.toml")
+ALL_CRATES_PATHS = ("Cargo.toml", "Cargo.lock", "deny.toml", "rust-toolchain.toml",
+                    ".github/workflows/", "scripts/")
+DENY_FILES = ("Cargo.toml", "Cargo.lock", "deny.toml")
 
 
-def is_global(path: str) -> bool:
-    return any(path.startswith(g) if g.endswith("/") else path == g for g in GLOBAL)
+def affects_all_crates(path: str) -> bool:
+    return any(path.startswith(p) if p.endswith("/") else path == p for p in ALL_CRATES_PATHS)
 
 
 def changed_files(base: str, head: str) -> list[str]:
@@ -56,7 +46,7 @@ def main() -> None:
     files = changed_files(base, head)
     dirs, dependents = workspace()
 
-    if any(is_global(f) for f in files):
+    if any(affects_all_crates(f) for f in files):
         affected = set(dependents)
     else:
         affected = {name for d, name in dirs.items()
@@ -68,7 +58,7 @@ def main() -> None:
                     affected.add(dependent)
                     pending.append(dependent)
 
-    deny = any(Path(f).name in DEPENDENCY for f in files)
+    deny = any(Path(f).name in DENY_FILES for f in files)
     print(f"crates={json.dumps(sorted(affected))}")
     print(f"deny={'true' if deny else 'false'}")
 

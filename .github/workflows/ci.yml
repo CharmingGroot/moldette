@@ -8,7 +8,6 @@ on:
 permissions:
   contents: read
 
-# A newer push to the same branch makes the running check obsolete.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -28,8 +27,6 @@ jobs:
         with:
           fetch-depth: 0
       - id: affected
-        # Pull requests check only the changed crates and their dependents.
-        # Pushes to main check everything once more after the squash merge.
         run: |
           if [ "${{ github.event_name }}" = pull_request ]; then
             python3 scripts/affected.py "origin/${{ github.base_ref }}" HEAD >> "$GITHUB_OUTPUT"
@@ -66,13 +63,9 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: ${{ matrix.crate }}
-      # Each crate is built on its own (-p) rather than with the workspace, so
-      # that features unified across the workspace cannot hide a crate that
-      # does not build alone (#3, #9).
+      # Built per crate; see #9.
       - run: cargo clippy -p ${{ matrix.crate }} --all-targets
       - run: cargo test -p ${{ matrix.crate }}
-      # Keeps each crate and its dependencies buildable for wasm32, the target
-      # of the planned WASM port.
       - run: cargo build -p ${{ matrix.crate }} --target wasm32-unknown-unknown
 
   deny:
@@ -83,8 +76,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: EmbarkStudios/cargo-deny-action@70f81531115945ba6eb6b941ec9d39d063438eb9 # v2.1.2
 
-  # Single required status check. Skipped jobs count as passed, so a pull
-  # request that touches only docs is not left waiting on checks that never run.
+  # Single required check; see #9.
   ci-ok:
     needs: [changes, fmt, crate, deny]
     if: always()
