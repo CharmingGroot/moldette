@@ -1,0 +1,12 @@
+[package]
+name = "moldette-resp"
+version = "0.0.0"
+description = "Turns mapped records into moldette responses"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+# Kept unpublished until the first public release (#10).
+publish = false
+
+[dependencies]
+moldette-core = { path = "../moldette-core" }
