@@ -91,7 +91,9 @@ use core types only.
 ### M0 core
 
 - `Value` representation (#13)
-- `FieldRecord`, `OutputSchema`, `Mapped`, `Response`, `SpecError`
+- `FieldRecord`: empty vs absent (#18), field lookup (#19)
+- `Mapped`: timestamp type (#20)
+- `OutputSchema`, `Response`, `SpecError`
 - `Send + Sync` assertions on public types
 - `tracing` feature, `moldette.*` names
 - repository baseline: `SECURITY.md`, Dependabot
