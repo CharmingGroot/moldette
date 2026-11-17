@@ -1,0 +1,9 @@
+[package]
+name = "moldette-core"
+version = "0.0.0"
+description = "Contract types shared by moldette layers"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+# Kept unpublished until the first public release (docs/PLAN.md, "Supply chain").
+publish = false
