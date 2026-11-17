@@ -1,0 +1,14 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Local agent instructions
+CLAUDE.md
+CLAUDE.local.md
+.claude/
+AGENTS.md
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
