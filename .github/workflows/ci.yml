@@ -68,8 +68,7 @@ jobs:
           key: ${{ matrix.crate }}
       # Each crate is built on its own (-p) rather than with the workspace, so
       # that features unified across the workspace cannot hide a crate that
-      # does not build alone. This checks the "each layer works on its own"
-      # contract in docs/PLAN.md.
+      # does not build alone (#3, #9).
       - run: cargo clippy -p ${{ matrix.crate }} --all-targets
       - run: cargo test -p ${{ matrix.crate }}
       # Keeps each crate and its dependencies buildable for wasm32, the target
