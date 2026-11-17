@@ -5,5 +5,5 @@ description = "Contract types shared by moldette layers"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-# Kept unpublished until the first public release (docs/PLAN.md, "Supply chain").
+# Kept unpublished until the first public release (#10).
 publish = false
