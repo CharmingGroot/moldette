@@ -93,7 +93,6 @@ use core types only.
 - `Value` representation, empty vs absent, field lookup, timestamp type (#13)
 - `FieldRecord`, `OutputSchema`, `Mapped`, `Response`, `SpecError`
 - `Send + Sync` assertions on public types
-- `tracing` feature, `moldette.*` names
 - repository baseline: `SECURITY.md`, Dependabot
 
 ### M1 parser
@@ -105,7 +104,7 @@ use core types only.
 5. `kv`
 6. header + body composition
 7. custom parser registration
-8. spans and events
+8. `tracing` feature, `moldette.*` names, spans and events
 9. standalone tests
 
 ### M2 mapper
