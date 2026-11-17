@@ -32,6 +32,12 @@ impl<'a> FieldRecord<'a> {
             .map(|(_, v)| v.as_ref())
     }
 
+    /// Like [`FieldRecord::get`], but keeps the lifetime of the raw record so
+    /// that callers can pass the value on without copying it.
+    pub fn get_cow(&self, name: &str) -> Option<&Cow<'a, str>> {
+        self.fields.iter().find(|(n, _)| n == name).map(|(_, v)| v)
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
         self.fields.iter().map(|(n, v)| (n.as_ref(), v.as_ref()))
     }
@@ -74,6 +80,17 @@ mod tests {
         record.insert("a", "2");
         assert_eq!(record.get("a"), Some("1"));
         assert_eq!(record.len(), 2);
+    }
+
+    #[test]
+    fn get_cow_keeps_the_raw_record_lifetime() {
+        let raw = String::from("id=A-1");
+        let value: Cow<'_, str> = {
+            let mut record = FieldRecord::new();
+            record.insert("id", &raw[3..]);
+            record.get_cow("id").cloned().unwrap_or_default()
+        };
+        assert!(matches!(value, Cow::Borrowed("A-1")));
     }
 
     #[test]
