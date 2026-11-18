@@ -1,8 +1,10 @@
 use std::borrow::Cow;
 
-use moldette_core::{FieldRecord, SpecError};
+use moldette_core::{Field, FieldRecord, Mapped, SpecError, Type, Value};
 
+use crate::coerce::coerce;
 use crate::op::{CompiledOp, CustomOp, DeclaredOp, Op, invalid_argument};
+use crate::recorder::Recorder;
 
 /// Where one output field takes its value from, and the ops applied to it.
 ///
@@ -148,24 +150,73 @@ impl PartialEq for CompiledRule {
 }
 
 impl CompiledRule {
-    pub(crate) fn texts<'a>(
+    pub(crate) fn run<'a, R: Recorder<'a>>(
         &'a self,
+        field: &'a Field,
         record: &FieldRecord<'a>,
-    ) -> impl Iterator<Item = Cow<'a, str>> {
-        let primary = match &self.declared.source {
-            Source::Field(name) => record.get_cow(name).cloned(),
-            Source::Coalesce(names) => names.iter().find_map(|name| record.get_cow(name)).cloned(),
-            Source::Const(value) => Some(Cow::Borrowed(value.as_str())),
-        };
-        let fallback = self
-            .declared
-            .fallback
-            .iter()
-            .filter_map(|name| record.get_cow(name).cloned());
-        primary.into_iter().chain(fallback)
+        mapped: &mut Mapped<'a>,
+        recorder: &mut R,
+    ) {
+        recorder.field(field.name());
+        let primary = self.read(record, recorder);
+        let mut found = primary.is_some();
+        let mut value = primary.and_then(|text| self.convert(text, field.ty(), recorder));
+        if value.is_none() {
+            let fallback = self
+                .declared
+                .fallback
+                .as_deref()
+                .and_then(|name| read_field(name, record, recorder));
+            found |= fallback.is_some();
+            value = fallback.and_then(|text| self.convert(text, field.ty(), recorder));
+        }
+        match value {
+            Some(value) => mapped.insert(field.name(), value),
+            None if found => mapped.mark_emptied(field.name()),
+            None => {}
+        }
     }
 
-    pub(crate) fn apply<'a>(&'a self, text: Cow<'a, str>) -> Option<Cow<'a, str>> {
-        self.via.iter().try_fold(text, |text, op| op.apply(text))
+    fn read<'a, R: Recorder<'a>>(
+        &'a self,
+        record: &FieldRecord<'a>,
+        recorder: &mut R,
+    ) -> Option<Cow<'a, str>> {
+        match &self.declared.source {
+            Source::Field(name) => read_field(name, record, recorder),
+            Source::Coalesce(names) => names
+                .iter()
+                .find_map(|name| read_field(name, record, recorder)),
+            Source::Const(value) => {
+                recorder.constant(value);
+                Some(Cow::Borrowed(value.as_str()))
+            }
+        }
     }
+
+    fn convert<'a, R: Recorder<'a>>(
+        &'a self,
+        text: Cow<'a, str>,
+        ty: Type,
+        recorder: &mut R,
+    ) -> Option<Value<'a>> {
+        let text = self.via.iter().try_fold(text, |text, op| {
+            let output = op.apply(text);
+            recorder.step(op, output.as_ref());
+            output
+        })?;
+        let value = coerce(text, ty);
+        recorder.coerced(value.as_ref());
+        value
+    }
+}
+
+fn read_field<'a, R: Recorder<'a>>(
+    name: &'a str,
+    record: &FieldRecord<'a>,
+    recorder: &mut R,
+) -> Option<Cow<'a, str>> {
+    let text = record.get_cow(name).cloned();
+    recorder.read(name, text.as_ref());
+    text
 }

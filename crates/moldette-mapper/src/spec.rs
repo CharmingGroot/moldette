@@ -1,7 +1,7 @@
 use moldette_core::{FieldRecord, Mapped, OutputSchema, SpecError};
 
 use crate::Rule;
-use crate::coerce::coerce;
+use crate::recorder::{Discard, Recorder};
 use crate::rule::CompiledRule;
 
 /// Rules for every field of an output schema, validated and immutable.
@@ -28,18 +28,17 @@ impl MapperSpec {
     /// Maps one record. Output field names, lookup values and constants
     /// borrow from the spec, and other text values borrow from the record.
     pub fn map<'a>(&'a self, record: &FieldRecord<'a>) -> Mapped<'a> {
+        self.run(record, &mut Discard)
+    }
+
+    fn run<'a, R: Recorder<'a>>(
+        &'a self,
+        record: &FieldRecord<'a>,
+        recorder: &mut R,
+    ) -> Mapped<'a> {
         let mut mapped = Mapped::new();
         for (field, rule) in self.schema.fields().iter().zip(&self.rules) {
-            let mut found = false;
-            let value = rule.texts(record).find_map(|text| {
-                found = true;
-                rule.apply(text).and_then(|text| coerce(text, field.ty()))
-            });
-            match value {
-                Some(value) => mapped.insert(field.name(), value),
-                None if found => mapped.mark_emptied(field.name()),
-                None => {}
-            }
+            rule.run(field, record, &mut mapped, recorder);
         }
         mapped
     }
@@ -95,6 +94,7 @@ mod tests {
 
     use super::*;
     use crate::Op;
+    use crate::op::CompiledOp;
 
     const LOG_TIME: &str =
         "[day]/[month repr:short]/[year]:[hour]:[minute]:[second] [offset_hour][offset_minute]";
@@ -526,5 +526,73 @@ mod tests {
                 assert_eq!(handle.join().expect("thread finished"), expected);
             }
         });
+    }
+
+    #[derive(Default)]
+    struct Events(Vec<String>);
+
+    impl<'a> Recorder<'a> for Events {
+        fn field(&mut self, name: &'a str) {
+            self.0.push(format!("field {name}"));
+        }
+
+        fn read(&mut self, field: &'a str, text: Option<&Cow<'a, str>>) {
+            self.0.push(format!("read {field} {text:?}"));
+        }
+
+        fn constant(&mut self, value: &'a str) {
+            self.0.push(format!("constant {value:?}"));
+        }
+
+        fn step(&mut self, op: &'a CompiledOp, output: Option<&Cow<'a, str>>) {
+            self.0.push(format!("step {op:?} {output:?}"));
+        }
+
+        fn coerced(&mut self, value: Option<&Value<'a>>) {
+            self.0.push(format!("coerced {value:?}"));
+        }
+    }
+
+    #[test]
+    fn recorder_receives_reads_ops_and_conversions_in_order() {
+        let schema = OutputSchema::builder("order", 1)
+            .field(Field::new("quantity", Type::Int))
+            .field(Field::new("order_id", Type::String))
+            .build()
+            .expect("valid schema");
+        let spec = MapperSpec::builder(schema)
+            .rule(
+                Rule::coalesce("quantity", ["qty", "count"])
+                    .trim()
+                    .split(' ', 0)
+                    .fallback("n"),
+            )
+            .rule(Rule::constant("order_id", "").empty_as_none())
+            .build()
+            .expect("valid rules");
+        let record = record(&[("count", " x pcs"), ("n", "4")]);
+
+        let mut events = Events::default();
+        let mapped = spec.run(&record, &mut events);
+
+        assert_eq!(mapped, spec.map(&record));
+        assert_eq!(
+            events.0,
+            [
+                "field quantity",
+                "read qty None",
+                r#"read count Some(" x pcs")"#,
+                r#"step Trim Some("x pcs")"#,
+                r#"step Split { separator: ' ', index: 0 } Some("x")"#,
+                "coerced None",
+                r#"read n Some("4")"#,
+                r#"step Trim Some("4")"#,
+                r#"step Split { separator: ' ', index: 0 } Some("4")"#,
+                "coerced Some(Int(4))",
+                "field order_id",
+                r#"constant """#,
+                "step EmptyAsNone None",
+            ]
+        );
     }
 }
