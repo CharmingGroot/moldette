@@ -4,6 +4,7 @@ use moldette_parser::{Format, ParserSpec};
 use moldette_resp::RespSpec;
 
 use crate::check::Report;
+use crate::digest::digest;
 use crate::error::{LoadError, LoadErrorKind, Position};
 use crate::model::{
     Config, FieldEntry, FormatEntry, MapperSection, OpEntry, ParserSection, RespSection, RuleEntry,
@@ -13,9 +14,11 @@ use crate::node::{index_path, key_path};
 use crate::registry::Registry;
 
 /// The specs built from a [`Config`]: every schema of `schemas`, and the spec
-/// of each layer section present.
+/// of each layer section present. Immutable once built; callers share it
+/// behind an `Arc` and replace that `Arc` to apply a new configuration (#8).
 #[derive(Debug, Clone)]
 pub struct Specs {
+    digest: String,
     schemas: Vec<OutputSchema>,
     parser: Option<ParserSpec>,
     mapper: Option<MapperSpec>,
@@ -24,6 +27,13 @@ pub struct Specs {
 }
 
 impl Specs {
+    /// Identifies the configuration: equal [`Config`] values, read from YAML
+    /// or JSON, give the same `sha256:` digest on every platform and Rust
+    /// release, and different values give different digests.
+    pub fn digest(&self) -> &str {
+        &self.digest
+    }
+
     /// The report of [`Config::check`], which holds warnings only because
     /// [`Config::build`] fails on an error.
     pub fn report(&self) -> &Report {
@@ -76,6 +86,7 @@ impl Config {
             return Err(error.to_load_error());
         }
         Ok(Specs {
+            digest: digest(self),
             schemas,
             parser,
             mapper,

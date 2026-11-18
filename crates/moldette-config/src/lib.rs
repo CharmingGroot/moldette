@@ -12,11 +12,13 @@
 //!
 //! [`Config::check`] reports what the sections get wrong together, such as a
 //! rule reading a field the parser never outputs. Errors fail the build, and
-//! warnings are kept in [`Specs::report`].
+//! warnings are kept in [`Specs::report`]. [`Specs::digest`] identifies the
+//! configuration the specs were built from.
 
 mod arguments;
 mod check;
 mod decode;
+mod digest;
 mod error;
 mod json;
 mod lower;

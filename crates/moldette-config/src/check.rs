@@ -48,7 +48,9 @@ impl Diagnostic {
             DiagnosticKind::UnknownSourceField(_)
             | DiagnosticKind::AbsentRequiredField(_)
             | DiagnosticKind::SchemaMismatch { .. } => Severity::Error,
-            DiagnosticKind::AbsentField(_) | DiagnosticKind::UnreadField(_) => Severity::Warning,
+            DiagnosticKind::AbsentField(_)
+            | DiagnosticKind::UnreadField(_)
+            | DiagnosticKind::DeprecatedField(_) => Severity::Warning,
         }
     }
 
@@ -94,10 +96,14 @@ pub enum DiagnosticKind {
     /// name to read, so every record misses it. An error.
     AbsentRequiredField(String),
     /// An optional schema field has no rule and no parser field of the same
-    /// name to read. A warning.
+    /// name to read. A warning. Deprecated fields are reported as neither
+    /// absent nor required.
     AbsentField(String),
     /// No rule reads the parser field. A warning.
     UnreadField(String),
+    /// A deprecated schema field is the target of a rule, or is mapped from
+    /// the parser field of the same name. A warning.
+    DeprecatedField(String),
     /// The resp section references another schema than the one the mapper
     /// section maps to, given here. An error.
     SchemaMismatch { name: String, version: u32 },
@@ -112,6 +118,7 @@ impl fmt::Display for DiagnosticKind {
             }
             Self::AbsentField(name) => write!(f, "field `{name}` has no source in any record"),
             Self::UnreadField(name) => write!(f, "no rule reads field `{name}`"),
+            Self::DeprecatedField(name) => write!(f, "deprecated field `{name}` is mapped"),
             Self::SchemaMismatch { name, version } => {
                 write!(f, "the mapper maps to schema `{name}` version {version}")
             }
@@ -142,11 +149,13 @@ impl Config {
                 .map(|(i, entry)| (section, i, entry))
         });
         if let Some((section, i, entry)) = mapper {
-            absent_fields(section, i, entry, outputs.as_deref(), &mut diagnostics);
+            fields_without_rules(section, i, entry, outputs.as_deref(), &mut diagnostics);
         }
         if let (Some(outputs), Some((section, _, entry))) = (&outputs, mapper) {
             unread_fields(section, entry, outputs, &mut diagnostics);
-            unknown_sources(section, outputs, &mut diagnostics);
+        }
+        if let Some((section, _, entry)) = mapper {
+            rule_targets_and_sources(section, entry, outputs.as_deref(), &mut diagnostics);
         }
         let schemas = self.mapper.as_ref().zip(self.resp.as_ref());
         if let Some((mapper, resp)) = schemas.filter(|(mapper, resp)| mapper.schema != resp.schema)
@@ -172,7 +181,7 @@ fn has_rule(section: &MapperSection, name: &str) -> bool {
     section.rules.iter().any(|rule| rule.target == name)
 }
 
-fn absent_fields(
+fn fields_without_rules(
     section: &MapperSection,
     schema_index: usize,
     entry: &SchemaEntry,
@@ -184,19 +193,18 @@ fn absent_fields(
         if has_rule(section, &field.name) {
             continue;
         }
-        let kind = match (field.required, section.explicit_rules, outputs) {
-            (true, true, _) => DiagnosticKind::AbsentRequiredField(field.name.clone()),
-            (required, false, Some(outputs)) if !outputs_contain(outputs, &field.name) => {
-                if required {
-                    DiagnosticKind::AbsentRequiredField(field.name.clone())
-                } else {
-                    DiagnosticKind::AbsentField(field.name.clone())
-                }
+        let produced = outputs.map(|outputs| outputs_contain(outputs, &field.name));
+        let kind = match (field.deprecated, section.explicit_rules, produced) {
+            (true, false, Some(true)) => DiagnosticKind::DeprecatedField,
+            (true, ..) => continue,
+            (false, true, _) | (false, false, Some(false)) if field.required => {
+                DiagnosticKind::AbsentRequiredField
             }
+            (false, false, Some(false)) => DiagnosticKind::AbsentField,
             _ => continue,
         };
         diagnostics.push(Diagnostic {
-            kind,
+            kind: kind(field.name.clone()),
             path: index_path(&fields_path, k),
             position: field.position,
         });
@@ -236,12 +244,27 @@ fn unread_fields(
     }
 }
 
-fn unknown_sources(
+fn rule_targets_and_sources(
     section: &MapperSection,
-    outputs: &[Declared<'_>],
+    entry: &SchemaEntry,
+    outputs: Option<&[Declared<'_>]>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for (i, rule) in section.rules.iter().enumerate() {
+        let deprecated = entry
+            .fields
+            .iter()
+            .any(|field| field.name == rule.target && field.deprecated);
+        if deprecated {
+            diagnostics.push(Diagnostic {
+                kind: DiagnosticKind::DeprecatedField(rule.target.clone()),
+                path: key_path(&index_path("mapper.rules", i), "target"),
+                position: rule.target_position,
+            });
+        }
+        let Some(outputs) = outputs else {
+            continue;
+        };
         for (name, path, position) in rule_sources(rule, i) {
             if !outputs_contain(outputs, name) {
                 diagnostics.push(Diagnostic {

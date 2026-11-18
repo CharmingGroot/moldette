@@ -86,6 +86,10 @@ impl Arguments {
         )
     }
 
+    pub(crate) fn entries(&self) -> &[(Key, Node)] {
+        &self.entries
+    }
+
     pub(crate) fn error(&self, kind: LoadErrorKind) -> LoadError {
         LoadError::new(kind, self.path.clone(), self.position)
     }
