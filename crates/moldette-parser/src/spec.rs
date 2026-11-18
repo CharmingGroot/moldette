@@ -166,14 +166,8 @@ impl ParserSpecBuilder {
         self
     }
 
-    /// Parses the text at `path` with `spec`, a body in a format of its own,
-    /// and appends the fields of `spec` after the fields of this spec. The
-    /// path uses the notation of this spec's format; a regex group such as
-    /// `(?P<body>.*)` takes the rest of a record. A path without a value
-    /// leaves the body fields absent, and a body that `spec` cannot parse
-    /// makes the record malformed. Body values borrow from the raw record
-    /// unless the text at `path` was unescaped. Field names must be unique
-    /// across this spec and its bodies.
+    /// Parses the text at `path`, in this spec's path notation, with `spec`
+    /// and appends its fields; a body `spec` cannot parse makes the record malformed.
     pub fn body(mut self, path: impl Into<String>, spec: ParserSpec) -> Self {
         self.bodies.push((path.into(), spec));
         self
