@@ -1,0 +1,68 @@
+schemas:
+  - name: access
+    version: 1
+    fields:
+      - {name: client, type: ip, required: true}
+      - {name: time, type: timestamp, required: true}
+      - {name: method, type: string}
+      - {name: path, type: string}
+      - {name: http_version, type: string}
+      - {name: status, type: int, required: true}
+      - {name: status_class, type: string}
+      - {name: bytes, type: int}
+      - {name: user_agent, type: string}
+      - {name: referer, type: string, deprecated: true}
+      - {name: site, type: string}
+
+parser:
+  format: regex
+  pattern: '^(?P<remote_addr>\S+) \S+ \S+ \[(?P<time_local>[^\]]+)\] "(?P<method>\S+) (?P<uri>\S+) (?P<protocol>[^"]+)" (?P<status>\d{3}) (?P<bytes>\d+|-) "(?P<referer>[^"]*)" "(?P<agent>[^"]*)" "(?P<forwarded_for>[^"]*)"$'
+  fields:
+    remote_addr: remote_addr
+    time_local: time_local
+    method: method
+    uri: uri
+    protocol: protocol
+    status: status
+    bytes: bytes
+    referer: referer
+    agent: agent
+    forwarded_for: forwarded_for
+  empty_as_none: true
+
+mapper:
+  schema: {name: access, version: 1}
+  rules:
+    - target: client
+      from: forwarded_for
+      fallback: remote_addr
+      via:
+        - split: {separator: ",", index: 0}
+        - trim
+    - target: time
+      from: time_local
+      via:
+        - timestamp:
+            formats:
+              - "[day]/[month repr:short]/[year]:[hour]:[minute]:[second] [offset_hour][offset_minute]"
+    - target: path
+      from: uri
+      via:
+        - split: {separator: "?", index: 0}
+    - target: http_version
+      from: protocol
+      via:
+        - extract: {pattern: '^HTTP/(\d(?:\.\d)?)$'}
+    - target: status_class
+      from: status
+      via:
+        - extract: {pattern: '^(\d)'}
+        - lookup:
+            table: {"1": informational, "2": success, "3": redirection, "4": client_error, "5": server_error}
+    - target: user_agent
+      from: agent
+    - target: site
+      constant: web-01
+
+resp:
+  schema: {name: access, version: 1}
