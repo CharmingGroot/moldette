@@ -3,7 +3,8 @@ use moldette_mapper::{MapperSpec, Rule};
 use moldette_parser::{Format, ParserSpec};
 use moldette_resp::RespSpec;
 
-use crate::error::{LoadError, LoadErrorKind};
+use crate::check::Report;
+use crate::error::{LoadError, LoadErrorKind, Position};
 use crate::model::{
     Config, FieldEntry, FormatEntry, MapperSection, OpEntry, ParserSection, RespSection, RuleEntry,
     SchemaEntry, SchemaRef, SourceEntry,
@@ -19,9 +20,16 @@ pub struct Specs {
     parser: Option<ParserSpec>,
     mapper: Option<MapperSpec>,
     resp: Option<RespSpec>,
+    report: Report,
 }
 
 impl Specs {
+    /// The report of [`Config::check`], which holds warnings only because
+    /// [`Config::build`] fails on an error.
+    pub fn report(&self) -> &Report {
+        &self.report
+    }
+
     pub fn schemas(&self) -> &[OutputSchema] {
         &self.schemas
     }
@@ -43,26 +51,36 @@ impl Config {
     /// Calls the layer builders, one builder method per key (#3), with the
     /// caller-defined ops and formats of `registry`. An error of a layer
     /// builder is reported as [`LoadErrorKind::Spec`] at the most specific key
-    /// path it can be traced to, without a position.
+    /// path it can be traced to, without a position. After the layer builders
+    /// succeed, the first error of [`Config::check`] fails the build as
+    /// [`LoadErrorKind::Diagnostic`].
     pub fn build(&self, registry: &Registry) -> Result<Specs, LoadError> {
         let schemas = output_schemas(&self.schemas)?;
+        let parser = self
+            .parser
+            .as_ref()
+            .map(|section| parser_spec(section, "parser", registry))
+            .transpose()?;
+        let mapper = self
+            .mapper
+            .as_ref()
+            .map(|section| mapper_spec(section, &schemas, registry))
+            .transpose()?;
+        let resp = self
+            .resp
+            .as_ref()
+            .map(|section| resp_spec(section, &schemas))
+            .transpose()?;
+        let report = self.check();
+        if let Some(error) = report.first_error() {
+            return Err(error.to_load_error());
+        }
         Ok(Specs {
-            parser: self
-                .parser
-                .as_ref()
-                .map(|section| parser_spec(section, "parser", registry))
-                .transpose()?,
-            mapper: self
-                .mapper
-                .as_ref()
-                .map(|section| mapper_spec(section, &schemas, registry))
-                .transpose()?,
-            resp: self
-                .resp
-                .as_ref()
-                .map(|section| resp_spec(section, &schemas))
-                .transpose()?,
             schemas,
+            parser,
+            mapper,
+            resp,
+            report,
         })
     }
 }
@@ -220,17 +238,32 @@ fn parser_error_path(section: &ParserSection, path: &str, err: &SpecError) -> St
                     .map(|i| key_path(&body_path(path, i), "path"))
             }),
         SpecError::InvalidArgument { name, .. } => Some(key_path(path, name)),
-        _ => name_error_path(err, parser_field_names(section, path)),
+        _ => name_error_path(
+            err,
+            parser_field_names(section, path)
+                .into_iter()
+                .map(|(name, path, _)| (name, path)),
+        ),
     };
     located.unwrap_or_else(|| path.to_owned())
 }
 
-fn parser_field_names<'s>(section: &'s ParserSection, path: &str) -> Vec<(&'s str, String)> {
+pub(crate) fn parser_field_names<'s>(
+    section: &'s ParserSection,
+    path: &str,
+) -> Vec<(&'s str, String, Option<Position>)> {
     let fields_path = key_path(path, "fields");
     let mut names: Vec<_> = section
         .fields
         .iter()
-        .map(|(name, _)| (name.as_str(), key_path(&fields_path, name)))
+        .enumerate()
+        .map(|(i, (name, _))| {
+            (
+                name.as_str(),
+                key_path(&fields_path, name),
+                section.field_positions.get(i).copied().flatten(),
+            )
+        })
         .collect();
     for (i, body) in section.bodies.iter().enumerate() {
         names.extend(parser_field_names(&body.parser, &body_path(path, i)));

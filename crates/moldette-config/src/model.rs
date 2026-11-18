@@ -33,16 +33,24 @@ impl PartialEq for SchemaEntry {
 }
 
 /// One output field, written with the key `type` for `ty`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Eq)]
 #[non_exhaustive]
 pub struct FieldEntry {
     pub name: String,
     pub ty: Type,
     pub required: bool,
     pub deprecated: bool,
+    pub(crate) position: Option<Position>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+impl PartialEq for FieldEntry {
+    fn eq(&self, other: &Self) -> bool {
+        (&self.name, self.ty, self.required, self.deprecated)
+            == (&other.name, other.ty, other.required, other.deprecated)
+    }
+}
+
+#[derive(Debug, Clone, Eq)]
 #[non_exhaustive]
 pub struct ParserSection {
     pub format: FormatEntry,
@@ -50,6 +58,19 @@ pub struct ParserSection {
     pub fields: Vec<(String, String)>,
     pub bodies: Vec<BodyEntry>,
     pub empty_as_none: bool,
+    pub(crate) field_positions: Vec<Option<Position>>,
+}
+
+impl PartialEq for ParserSection {
+    fn eq(&self, other: &Self) -> bool {
+        (&self.format, &self.fields, &self.bodies, self.empty_as_none)
+            == (
+                &other.format,
+                &other.fields,
+                &other.bodies,
+                other.empty_as_none,
+            )
+    }
 }
 
 /// The `format` key with its sibling argument keys.
@@ -107,13 +128,22 @@ impl PartialEq for SchemaRef {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Eq)]
 #[non_exhaustive]
 pub struct RuleEntry {
     pub target: String,
     pub source: SourceEntry,
     pub fallback: Option<String>,
     pub via: Vec<OpEntry>,
+    pub(crate) source_positions: Vec<Option<Position>>,
+    pub(crate) fallback_position: Option<Position>,
+}
+
+impl PartialEq for RuleEntry {
+    fn eq(&self, other: &Self) -> bool {
+        (&self.target, &self.source, &self.fallback, &self.via)
+            == (&other.target, &other.source, &other.fallback, &other.via)
+    }
 }
 
 /// The source of a rule: exactly one of `from`, `coalesce` and `constant`.
@@ -229,6 +259,7 @@ fn schema(cursor: Cursor<'_>) -> Result<SchemaEntry, LoadError> {
 }
 
 fn field(cursor: Cursor<'_>) -> Result<FieldEntry, LoadError> {
+    let position = cursor.node.position;
     let map = cursor.map()?;
     map.allow(&["name", "type", "required", "deprecated"])?;
     let ty = map.require("type")?;
@@ -237,6 +268,7 @@ fn field(cursor: Cursor<'_>) -> Result<FieldEntry, LoadError> {
         ty: field_type(&ty)?,
         required: map.flag("required")?,
         deprecated: map.flag("deprecated")?,
+        position,
     })
 }
 
@@ -284,13 +316,17 @@ fn parser(map: &MapReader<'_>, extra_keys: &[&str]) -> Result<ParserSection, Loa
 }
 
 fn parser_section(map: &MapReader<'_>, format: FormatEntry) -> Result<ParserSection, LoadError> {
+    let (fields, field_positions) = map
+        .get("fields")
+        .map(located_string_map)
+        .transpose()?
+        .unwrap_or_default()
+        .into_iter()
+        .unzip();
     Ok(ParserSection {
         format,
-        fields: map
-            .get("fields")
-            .map(string_map)
-            .transpose()?
-            .unwrap_or_default(),
+        fields,
+        field_positions,
         bodies: map
             .get("bodies")
             .map(|cursor| cursor.list(body))
@@ -345,18 +381,27 @@ fn schema_ref(cursor: Cursor<'_>) -> Result<SchemaRef, LoadError> {
 fn rule(cursor: Cursor<'_>) -> Result<RuleEntry, LoadError> {
     let map = cursor.map()?;
     map.allow(&["target", "from", "coalesce", "constant", "fallback", "via"])?;
-    let source = match map.one_of(&["from", "coalesce", "constant"])? {
-        ("from", cursor) => SourceEntry::From(cursor.string()?),
-        ("coalesce", cursor) => SourceEntry::Coalesce(cursor.list(|item| item.string())?),
-        (_, cursor) => SourceEntry::Constant(cursor.string()?),
+    let (source, source_positions) = match map.one_of(&["from", "coalesce", "constant"])? {
+        ("from", cursor) => (
+            SourceEntry::From(cursor.string()?),
+            vec![cursor.node.position],
+        ),
+        ("coalesce", cursor) => {
+            let (names, positions) = cursor.list(located_string)?.into_iter().unzip();
+            (SourceEntry::Coalesce(names), positions)
+        }
+        (_, cursor) => (SourceEntry::Constant(cursor.string()?), Vec::new()),
+    };
+    let (fallback, fallback_position) = match map.get("fallback") {
+        Some(cursor) => (Some(cursor.string()?), cursor.node.position),
+        None => (None, None),
     };
     Ok(RuleEntry {
         target: map.require("target")?.string()?,
         source,
-        fallback: map
-            .get("fallback")
-            .map(|cursor| cursor.string())
-            .transpose()?,
+        fallback,
+        source_positions,
+        fallback_position,
         via: map
             .get("via")
             .map(|cursor| cursor.list(op))
@@ -421,4 +466,18 @@ fn string_map(cursor: Cursor<'_>) -> Result<Vec<(String, String)>, LoadError> {
         .entries()
         .map(|(key, value)| Ok((key.to_owned(), value.string()?)))
         .collect()
+}
+
+type Located<T> = (T, Option<Position>);
+
+fn located_string_map(cursor: Cursor<'_>) -> Result<Vec<Located<(String, String)>>, LoadError> {
+    cursor
+        .map()?
+        .entries()
+        .map(|(key, value)| Ok(((key.to_owned(), value.string()?), value.node.position)))
+        .collect()
+}
+
+fn located_string(cursor: Cursor<'_>) -> Result<Located<String>, LoadError> {
+    Ok((cursor.string()?, cursor.node.position))
 }
