@@ -1,0 +1,23 @@
+schemas:
+  - name: order
+    version: 1
+    fields:
+      - {name: id, type: string}
+      - {name: item, type: string}
+parser:
+  format: delimited
+  delimiter: "|"
+  fields: {id: "0", channel: "1"}
+  bodies:
+    - path: "2"
+      format: json
+      fields: {sku: /sku, note: /note}
+      bodies:
+        - path: /items
+          format: delimited
+          delimiter: ";"
+          fields: {first_item: "0"}
+mapper:
+  schema: {name: order, version: 1}
+  rules:
+    - {target: item, coalesce: [first_item, sku]}
