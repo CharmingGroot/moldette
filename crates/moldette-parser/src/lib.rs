@@ -5,6 +5,7 @@
 //! one spec can be shared across threads (#8). Values stay text; type
 //! conversion belongs to the mapper (#3).
 
+mod delimited;
 mod json;
 mod spec;
 
