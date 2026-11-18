@@ -1,0 +1,15 @@
+[package]
+name = "moldette-config"
+version = "0.0.0"
+description = "Reads moldette configuration files written in YAML or JSON"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+# Kept unpublished until the first public release (#10).
+publish = false
+
+[dependencies]
+moldette-core = { path = "../moldette-core" }
+serde = "1.0.229"
+serde_json = "1.0.154"
+yaml-rust2 = { version = "0.13.0", default-features = false }
