@@ -56,7 +56,7 @@ impl RespSpec {
     where
         I: IntoIterator<Item = Mapped<'a>>,
     {
-        let span = telemetry::batch_span(&self.schema);
+        let span = telemetry::batch_span(&self.schema, self.strict);
         span.in_scope(|| {
             let responses: Vec<Response<'a>> = records
                 .into_iter()

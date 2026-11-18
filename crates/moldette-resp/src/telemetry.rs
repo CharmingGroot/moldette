@@ -10,11 +10,12 @@ mod enabled {
     use tracing::field::Empty;
     use tracing::info_span;
 
-    pub(crate) fn batch_span(schema: &OutputSchema) -> Span {
+    pub(crate) fn batch_span(schema: &OutputSchema, strict: bool) -> Span {
         info_span!(
             "moldette.resp.respond_batch",
             moldette.schema.name = schema.name(),
             moldette.schema.version = schema.version(),
+            moldette.resp.strict = strict,
             moldette.resp.ok = Empty,
             moldette.resp.missing_required = Empty,
             moldette.resp.emptied = Empty,
@@ -40,7 +41,7 @@ mod disabled {
         }
     }
 
-    pub(crate) fn batch_span(_schema: &OutputSchema) -> Span {
+    pub(crate) fn batch_span(_schema: &OutputSchema, _strict: bool) -> Span {
         Span
     }
 
