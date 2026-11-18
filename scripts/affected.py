@@ -29,8 +29,13 @@ FULL_PATHS = ("Cargo.toml", "deny.toml", "rust-toolchain.toml", ".github/", "scr
 DENY_FILES = ("Cargo.toml", "Cargo.lock", "deny.toml")
 SHARED_KERNEL_CRATES = ("moldette-core",)
 SHARED_KERNEL_MODULES = {
-    "moldette-config": {"diagnostic", "error", "position"},
+    "moldette-config": {"diagnostic", "error", "node", "position"},
     "moldette-parser": {"text"},
+}
+# Hubs reviewed in #60: widely used, but a change keeps its narrower scope.
+REVIEWED_HUB_MODULES = {
+    "moldette-config": {"arguments", "model"},
+    "moldette-mapper": {"op"},
 }
 LOWERING_CRATE = "moldette-config"
 FACADE_CRATE = "moldette"
@@ -221,12 +226,12 @@ def lock_changes(base: str, head: str, crates: set[str]) -> set[str]:
 def shared_module_warnings(graphs: dict[str, Graph]) -> list[str]:
     warnings = []
     for crate, graph in sorted(graphs.items()):
-        kernels = SHARED_KERNEL_MODULES.get(crate, set())
+        known = SHARED_KERNEL_MODULES.get(crate, set()) | REVIEWED_HUB_MODULES.get(crate, set())
         for module in sorted(graph):
             users = sorted(user for user, used in graph.items() if module in used)
-            if module not in kernels and len(users) >= SHARED_USE_WARNING:
+            if module not in known and len(users) >= SHARED_USE_WARNING:
                 warnings.append(f"{crate}: module `{module}` is used by {', '.join(users)} "
-                                "and is not a shared kernel in scripts/affected.py")
+                                "and is neither a shared kernel nor a reviewed hub in scripts/affected.py")
     return warnings
 
 

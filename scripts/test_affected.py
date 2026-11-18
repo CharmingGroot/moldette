@@ -181,12 +181,17 @@ class LockChangesTest(unittest.TestCase):
 
 
 class SharedModuleWarningsTest(unittest.TestCase):
-    def test_warns_on_modules_used_by_three_modules_unless_shared_kernel(self):
-        self.assertEqual(shared_module_warnings({MAPPER: GRAPHS[MAPPER], PARSER: GRAPHS[PARSER]}), [
-            "moldette-mapper: module `op` is used by recorder, rule, spec "
-            "and is not a shared kernel in scripts/affected.py",
-        ])
+    def test_skips_shared_kernels_and_reviewed_hubs(self):
+        self.assertEqual(shared_module_warnings({MAPPER: GRAPHS[MAPPER], PARSER: GRAPHS[PARSER]}), [])
 
+    def test_warns_on_other_modules_used_by_three_modules(self):
+        graph = {module: {"codec" if used == "op" else used for used in uses}
+                 for module, uses in GRAPHS[MAPPER].items() if module != "op"}
+        graph["codec"] = set(GRAPHS[MAPPER]["op"])
+        self.assertEqual(shared_module_warnings({MAPPER: graph}), [
+            "moldette-mapper: module `codec` is used by recorder, rule, spec "
+            "and is neither a shared kernel nor a reviewed hub in scripts/affected.py",
+        ])
 
 if __name__ == "__main__":
     unittest.main()
