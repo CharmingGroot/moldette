@@ -9,7 +9,7 @@ use crate::telemetry;
 ///
 /// A schema field without a rule reads the source field of the same name,
 /// unless the spec was built with [`MapperSpecBuilder::explicit_rules`].
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MapperSpec {
     schema: OutputSchema,
     rules: Vec<Option<CompiledRule>>,

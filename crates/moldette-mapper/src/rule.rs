@@ -151,6 +151,8 @@ impl PartialEq for CompiledRule {
     }
 }
 
+impl Eq for CompiledRule {}
+
 impl CompiledRule {
     pub(crate) fn run<'a, R: Recorder<'a>>(
         &'a self,
