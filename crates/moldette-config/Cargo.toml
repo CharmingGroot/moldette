@@ -15,5 +15,5 @@ moldette-parser = { path = "../moldette-parser" }
 moldette-resp = { path = "../moldette-resp" }
 serde = "1.0.229"
 serde_json = "1.0.154"
-sha2 = { version = "0.10.9", default-features = false }
+sha2 = { version = "0.11.1", default-features = false }
 yaml-rust2 = { version = "0.13.0", default-features = false }
