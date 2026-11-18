@@ -2,14 +2,17 @@ name: CI
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   push:
     branches: [main]
+  schedule:
+    - cron: "0 18 * * 0"
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -20,19 +23,22 @@ jobs:
   changes:
     runs-on: ubuntu-latest
     outputs:
-      crates: ${{ steps.affected.outputs.crates }}
+      matrix: ${{ steps.affected.outputs.matrix }}
       deny: ${{ steps.affected.outputs.deny }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - id: affected
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          # Main pushes, the weekly schedule and the ci:full label run every crate in full; see #56.
+          FULL: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:full') }}
         run: |
-          if [ "${{ github.event_name }}" = pull_request ]; then
-            python3 scripts/affected.py "origin/${{ github.base_ref }}" HEAD >> "$GITHUB_OUTPUT"
+          if [ "$FULL" = true ]; then
+            python3 scripts/affected.py --full >> "$GITHUB_OUTPUT"
           else
-            echo "crates=$(cargo metadata --format-version 1 --no-deps | jq -c '[.packages[].name] | sort')" >> "$GITHUB_OUTPUT"
-            echo "deny=true" >> "$GITHUB_OUTPUT"
+            python3 scripts/affected.py "origin/$BASE_REF" HEAD >> "$GITHUB_OUTPUT"
           fi
 
   fmt:
@@ -45,20 +51,24 @@ jobs:
           components: rustfmt
       - run: cargo fmt --all --check
 
-  modules:
+  scripts:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: python3 scripts/module_graph.py --print
+      - run: python3 -m unittest discover -s scripts -v
 
   crate:
+    name: crate (${{ matrix.crate }}, ${{ matrix.scope }})
     needs: changes
-    if: needs.changes.outputs.crates != '[]'
+    if: needs.changes.outputs.matrix != '[]'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        crate: ${{ fromJSON(needs.changes.outputs.crates) }}
+        include: ${{ fromJSON(needs.changes.outputs.matrix) }}
+    env:
+      CRATE: ${{ matrix.crate }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master 2026-11-15
@@ -68,24 +78,49 @@ jobs:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          key: ${{ matrix.crate }}
+          key: ${{ matrix.crate }}-${{ matrix.scope }}
       # Built per crate; see #9.
-      - run: cargo clippy -p ${{ matrix.crate }} --all-targets
-      - run: cargo test -p ${{ matrix.crate }}
-      - run: cargo build -p ${{ matrix.crate }} --target wasm32-unknown-unknown
-      - run: cargo clippy -p ${{ matrix.crate }} --all-targets --all-features
-      - run: cargo test -p ${{ matrix.crate }} --all-features
-      - run: cargo build -p ${{ matrix.crate }} --target wasm32-unknown-unknown --all-features
+      - if: matrix.scope == 'full'
+        run: cargo clippy -p "$CRATE" --all-targets
+      - if: matrix.scope == 'full'
+        run: cargo test -p "$CRATE"
+      - if: matrix.scope == 'full'
+        run: cargo build -p "$CRATE" --target wasm32-unknown-unknown
+      - if: matrix.scope == 'full'
+        run: cargo clippy -p "$CRATE" --all-targets --all-features
+      - if: matrix.scope == 'full'
+        run: cargo test -p "$CRATE" --all-features
+      - if: matrix.scope == 'full'
+        run: cargo build -p "$CRATE" --target wasm32-unknown-unknown --all-features
       - name: Each feature alone, for crates with default features
+        if: matrix.scope == 'full'
         run: |
-          features=$(cargo metadata --format-version 1 --no-deps | jq -r --arg crate "${{ matrix.crate }}" \
+          features=$(cargo metadata --format-version 1 --no-deps | jq -r --arg crate "$CRATE" \
             '.packages[] | select(.name == $crate) | .features | select(has("default")) | keys[] | select(. != "default")')
           if [ -n "$features" ]; then
-            cargo clippy -p ${{ matrix.crate }} --all-targets --no-default-features
+            cargo clippy -p "$CRATE" --all-targets --no-default-features
             for feature in $features; do
-              cargo clippy -p ${{ matrix.crate }} --all-targets --no-default-features --features "$feature"
+              cargo clippy -p "$CRATE" --all-targets --no-default-features --features "$feature"
             done
           fi
+      - if: matrix.scope != 'full'
+        run: cargo check -p "$CRATE" --all-targets
+      - if: matrix.scope == 'edge'
+        run: cargo check -p "$CRATE" --all-targets --all-features
+      - name: Coupling tests
+        if: matrix.scope == 'edge'
+        env:
+          TESTS: ${{ toJSON(matrix.tests) }}
+        run: |
+          mapfile -t tests < <(jq -r '.[]' <<< "$TESTS")
+          for test in "${tests[@]}"; do
+            read -ra args <<< "$test"
+            cargo test -p "$CRATE" "${args[@]}"
+          done
+      - if: matrix.scope == 'edge'
+        run: cargo check -p "$CRATE" --target wasm32-unknown-unknown
+      - if: matrix.scope == 'edge'
+        run: cargo check -p "$CRATE" --target wasm32-unknown-unknown --all-features
 
   deny:
     needs: changes
@@ -97,7 +132,7 @@ jobs:
 
   # Single required check; see #9.
   ci-ok:
-    needs: [changes, fmt, modules, crate, deny]
+    needs: [changes, fmt, scripts, crate, deny]
     if: always()
     runs-on: ubuntu-latest
     steps:
