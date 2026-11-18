@@ -4,6 +4,7 @@ use moldette_core::{FieldRecord, Malformed, SpecError, validate_field_names};
 
 use crate::delimited::DelimitedColumns;
 use crate::json::{self, JsonPaths};
+use crate::kv::KvKeys;
 use crate::regex::RegexGroups;
 
 /// The format of the raw records a spec parses.
@@ -27,6 +28,19 @@ pub enum Format {
     /// trailing line break is ignored, and a record without a match is
     /// malformed.
     Regex { pattern: String },
+    /// One record of key-value pairs such as logfmt, split into pairs at
+    /// `pair_delimiter` and each pair into key and value at the first
+    /// `key_value_delimiter`. A field path is a key, and the first pair with
+    /// that key gives the value. Consecutive pair delimiters count as one. A
+    /// value starting with `"` is quoted: it may contain both delimiters and
+    /// uses the backslash escapes of JSON strings. A key with no
+    /// `key_value_delimiter` leaves its field absent, and a pair with an empty
+    /// key is malformed. A trailing line break is ignored. The delimiters must
+    /// differ and cannot be `"`, `\n` or `\r`.
+    Kv {
+        pair_delimiter: char,
+        key_value_delimiter: char,
+    },
 }
 
 /// A validated description of how to parse raw records. Immutable once
@@ -43,6 +57,7 @@ enum Paths {
     Json(JsonPaths),
     Delimited(DelimitedColumns),
     Regex(RegexGroups),
+    Kv(KvKeys),
 }
 
 impl ParserSpec {
@@ -67,6 +82,7 @@ impl ParserSpec {
             }
             Paths::Delimited(columns) => self.insert_all(&mut record, columns.find(raw)?),
             Paths::Regex(groups) => self.insert_all(&mut record, groups.find(raw)?),
+            Paths::Kv(keys) => self.insert_all(&mut record, keys.find(raw)?),
         }
         Ok(record)
     }
@@ -113,6 +129,10 @@ impl ParserSpecBuilder {
                 Paths::Delimited(DelimitedColumns::new(delimiter, &paths)?)
             }
             Format::Regex { pattern } => Paths::Regex(RegexGroups::new(&pattern, &paths)?),
+            Format::Kv {
+                pair_delimiter,
+                key_value_delimiter,
+            } => Paths::Kv(KvKeys::new(pair_delimiter, key_value_delimiter, &paths)?),
         };
         Ok(ParserSpec {
             names,
@@ -144,6 +164,13 @@ mod tests {
     const ACCESS_LOG: &str = r#"203.0.113.7 - - [18/Nov/2026:10:15:32 +0000] "GET /orders?id=A-1 HTTP/1.1" 200 512 "-" "curl/8.5.0""#;
 
     const COMBINED: &str = r#"^(?P<client>\S+) \S+ (?P<user>\S+) \[(?P<time>[^\]]+)\] "(?P<method>\S+) (?P<path>\S+) (?P<protocol>[^"]+)" (?P<status>\d{3}) (?P<bytes>\d+|-) "(?P<referer>[^"]*)" "(?P<agent>[^"]*)"$"#;
+
+    const LOGFMT: Format = Format::Kv {
+        pair_delimiter: ' ',
+        key_value_delimiter: '=',
+    };
+
+    const APP_LOG: &str = r#"ts=2026-11-18T10:15:32Z level=info msg="order paid" order_id=A-1 amount=12.50 path=/orders?id=A-1"#;
 
     fn regex(pattern: &str) -> Format {
         Format::Regex {
@@ -228,6 +255,18 @@ mod tests {
                 "memo",
                 "id",
                 "A-1,,12.50",
+            ),
+            (
+                LOGFMT,
+                "memo",
+                "order_id",
+                "order_id=A-1 memo= amount=12.50",
+            ),
+            (
+                LOGFMT,
+                "memo",
+                "order_id",
+                r#"order_id=A-1 memo="" amount=12.50"#,
             ),
         ] {
             let spec = ParserSpec::builder(format)
@@ -392,6 +431,216 @@ mod tests {
             .map(|i| ACCESS_LOG.replace("A-1", &format!("A-{i}")))
             .collect();
         assert_same_records_across_threads(&access_log, &inputs);
+
+        let app_log = spec(LOGFMT, &[("order_id", "order_id"), ("msg", "msg")]);
+        let inputs: Vec<String> = (0..64)
+            .map(|i| format!(r#"level=info msg="say \"{i}\"" order_id=A-{i}"#))
+            .collect();
+        assert_same_records_across_threads(&app_log, &inputs);
+    }
+
+    #[test]
+    fn kv_selects_values_by_key_in_declared_order() {
+        let spec = spec(
+            LOGFMT,
+            &[
+                ("amount", "amount"),
+                ("order_id", "order_id"),
+                ("reference", "order_id"),
+                ("msg", "msg"),
+                ("path", "path"),
+                ("status", "status"),
+            ],
+        );
+        for raw in [
+            APP_LOG.to_owned(),
+            format!("{APP_LOG}\n"),
+            format!("{APP_LOG}\r\n"),
+            format!("  {}  ", APP_LOG.replace(" order_id", "   order_id")),
+        ] {
+            let record = spec.parse(&raw).expect("valid record");
+            assert_eq!(
+                fields(&record),
+                [
+                    ("amount", "12.50"),
+                    ("order_id", "A-1"),
+                    ("reference", "A-1"),
+                    ("msg", "order paid"),
+                    ("path", "/orders?id=A-1"),
+                ],
+                "{raw:?}"
+            );
+            assert!(matches!(
+                record.get_cow("msg"),
+                Some(Cow::Borrowed("order paid"))
+            ));
+        }
+    }
+
+    #[test]
+    fn kv_quoted_values_keep_delimiters_and_borrow_unless_escaped() {
+        let spec = spec(
+            LOGFMT,
+            &[
+                ("note", "note"),
+                ("msg", "msg"),
+                ("file", "file"),
+                ("customer", "customer"),
+                ("label", "label"),
+            ],
+        );
+        let record = spec
+            .parse(
+                r#"note="a=b c" msg="say \"hi\"\tthen\nleave" file="C:\\orders\/a.csv" customer="Jos\u00e9 \ud83d\ude00" label=5"ruler"#,
+            )
+            .expect("valid record");
+        assert!(matches!(
+            record.get_cow("note"),
+            Some(Cow::Borrowed("a=b c"))
+        ));
+        assert!(matches!(
+            record.get_cow("msg"),
+            Some(Cow::Owned(msg)) if msg == "say \"hi\"\tthen\nleave"
+        ));
+        assert!(matches!(
+            record.get_cow("file"),
+            Some(Cow::Owned(file)) if file == r"C:\orders/a.csv"
+        ));
+        assert!(matches!(
+            record.get_cow("customer"),
+            Some(Cow::Owned(customer)) if customer == "Jos\u{e9} \u{1f600}"
+        ));
+        assert!(matches!(
+            record.get_cow("label"),
+            Some(Cow::Borrowed(r#"5"ruler"#))
+        ));
+    }
+
+    #[test]
+    fn kv_key_without_delimiter_is_absent_and_empty_value_is_a_value() {
+        let spec = spec(
+            LOGFMT,
+            &[
+                ("retry", "retry"),
+                ("order_id", "order_id"),
+                ("memo", "memo"),
+                ("coupon", "coupon"),
+            ],
+        );
+        let record = spec
+            .parse(r#"retry order_id=A-1 memo= coupon="""#)
+            .expect("valid record");
+        assert_eq!(
+            fields(&record),
+            [("order_id", "A-1"), ("memo", ""), ("coupon", "")]
+        );
+
+        for raw in ["", "\n", "   "] {
+            assert!(spec.parse(raw).is_ok_and(|r| r.is_empty()), "{raw:?}");
+        }
+    }
+
+    #[test]
+    fn kv_first_pair_wins_for_repeated_keys() {
+        let spec = spec(LOGFMT, &[("status", "status"), ("retry", "retry")]);
+        let record = spec
+            .parse("status=pending retry status=paid retry=2")
+            .expect("valid record");
+        assert_eq!(fields(&record), [("status", "pending")]);
+    }
+
+    #[test]
+    fn kv_delimiters_are_configurable() {
+        let semicolon = spec(
+            Format::Kv {
+                pair_delimiter: ';',
+                key_value_delimiter: ':',
+            },
+            &[
+                ("order_id", "order_id"),
+                ("note", "note"),
+                ("amount", "amount"),
+            ],
+        );
+        let record = semicolon
+            .parse(r#"order_id:A-1;note:"paid; in full";amount:12.50"#)
+            .expect("valid record");
+        assert_eq!(
+            fields(&record),
+            [
+                ("order_id", "A-1"),
+                ("note", "paid; in full"),
+                ("amount", "12.50"),
+            ]
+        );
+
+        let query = spec(
+            Format::Kv {
+                pair_delimiter: '&',
+                key_value_delimiter: '=',
+            },
+            &[("order_id", "id"), ("page", "page")],
+        );
+        let record = query.parse("id=A-1&page=2").expect("valid record");
+        assert_eq!(fields(&record), [("order_id", "A-1"), ("page", "2")]);
+    }
+
+    #[test]
+    fn kv_rejects_quote_line_break_and_equal_delimiters() {
+        for (pair_delimiter, key_value_delimiter, name, value) in [
+            ('"', '=', "pair_delimiter", '"'),
+            ('\n', '=', "pair_delimiter", '\n'),
+            ('\r', '=', "pair_delimiter", '\r'),
+            (' ', '"', "key_value_delimiter", '"'),
+            (' ', '\n', "key_value_delimiter", '\n'),
+            (' ', '\r', "key_value_delimiter", '\r'),
+            ('=', '=', "key_value_delimiter", '='),
+        ] {
+            let result = ParserSpec::builder(Format::Kv {
+                pair_delimiter,
+                key_value_delimiter,
+            })
+            .field("order_id", "order_id")
+            .build();
+            assert_eq!(
+                result.map(|_| ()),
+                Err(SpecError::InvalidArgument {
+                    name: name.into(),
+                    value: value.into(),
+                }),
+                "{pair_delimiter:?} {key_value_delimiter:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn kv_rejects_keys_that_contain_a_delimiter() {
+        for path in ["", "order id", "order=id"] {
+            let result = ParserSpec::builder(LOGFMT).field("order_id", path).build();
+            assert_eq!(
+                result.map(|_| ()),
+                Err(SpecError::InvalidPath(path.into())),
+                "{path:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn kv_malformed_when_a_key_quote_or_escape_is_broken_in_any_pair() {
+        let spec = spec(LOGFMT, &[("order_id", "order_id")]);
+        for raw in [
+            "order_id=A-1 =paid",
+            r#"order_id=A-1 msg="open"#,
+            r#"order_id=A-1 msg="done"x"#,
+            r#"order_id=A-1 msg="trailing\"#,
+            r#"order_id=A-1 msg="bad \q""#,
+            r#"order_id=A-1 msg="\u12""#,
+            r#"order_id=A-1 msg="\u+123""#,
+            r#"order_id=A-1 msg="\ud83d""#,
+            r#"order_id=A-1 msg="\ude00\ude00""#,
+        ] {
+            assert!(spec.parse(raw).is_err(), "{raw:?}");
+        }
     }
 
     #[test]
