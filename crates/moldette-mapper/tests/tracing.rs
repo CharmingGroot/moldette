@@ -153,7 +153,53 @@ fn build_and_map_emit_spans_and_emptied_events_without_record_values() {
                 &[
                     schema_fields[0],
                     schema_fields[1],
-                    ("moldette.mapper.rules", "2")
+                    ("moldette.mapper.rules", "2"),
+                    ("moldette.mapper.explicit_rules", "false"),
+                ],
+            ),
+            signal("moldette.mapper.map", Level::TRACE, None, &schema_fields),
+            signal(
+                "moldette.mapper.emptied",
+                Level::TRACE,
+                Some("moldette.mapper.map"),
+                &[("moldette.field", "quantity")],
+            ),
+        ]
+    );
+}
+
+#[test]
+fn explicit_rules_are_reported_at_build_and_fields_without_a_rule_emit_no_event() {
+    let collector = Collector::default();
+    let mut record = FieldRecord::new();
+    record.insert("order_id", "A-1");
+    record.insert("qty", "three");
+
+    let signals = collector.collect(|| {
+        let spec = MapperSpec::builder(order_schema())
+            .rule(Rule::new("quantity", "qty"))
+            .explicit_rules()
+            .build()
+            .expect("valid rule");
+        spec.map(&record);
+    });
+
+    let schema_fields = [
+        ("moldette.schema.name", "order"),
+        ("moldette.schema.version", "3"),
+    ];
+    assert_eq!(
+        signals,
+        [
+            signal(
+                "moldette.mapper.build",
+                Level::INFO,
+                None,
+                &[
+                    schema_fields[0],
+                    schema_fields[1],
+                    ("moldette.mapper.rules", "1"),
+                    ("moldette.mapper.explicit_rules", "true"),
                 ],
             ),
             signal("moldette.mapper.map", Level::TRACE, None, &schema_fields),
@@ -189,6 +235,7 @@ fn failed_build_emits_spec_error_inside_the_build_span() {
                     ("moldette.schema.name", "order"),
                     ("moldette.schema.version", "3"),
                     ("moldette.mapper.rules", "1"),
+                    ("moldette.mapper.explicit_rules", "false"),
                 ],
             ),
             signal(

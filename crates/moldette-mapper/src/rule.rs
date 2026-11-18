@@ -111,8 +111,9 @@ impl Rule {
         self.push(DeclaredOp::EmptyAsNone)
     }
 
-    /// Applies a caller-defined op. A clone of the rule shares the op, and two
-    /// rules are equal only when they share each of their custom ops.
+    /// Applies a caller-defined op, which may be an `Arc<dyn Op>`. Each call
+    /// wraps `op` in a new `Arc`, so rules with custom ops are equal only when
+    /// one is a clone of the other.
     pub fn via(self, op: impl Op + 'static) -> Self {
         self.push(DeclaredOp::Custom(CustomOp::new(op)))
     }

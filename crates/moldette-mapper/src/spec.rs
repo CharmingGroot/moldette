@@ -7,11 +7,12 @@ use crate::telemetry;
 
 /// Rules for every field of an output schema, validated and immutable.
 ///
-/// A schema field without a rule reads the source field of the same name.
+/// A schema field without a rule reads the source field of the same name,
+/// unless the spec was built with [`MapperSpecBuilder::explicit_rules`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct MapperSpec {
     schema: OutputSchema,
-    rules: Vec<CompiledRule>,
+    rules: Vec<Option<CompiledRule>>,
 }
 
 impl MapperSpec {
@@ -19,6 +20,7 @@ impl MapperSpec {
         MapperSpecBuilder {
             schema,
             rules: Vec::new(),
+            explicit_rules: false,
         }
     }
 
@@ -48,7 +50,10 @@ impl MapperSpec {
         telemetry::map_span(&self.schema).in_scope(|| {
             let mut mapped = Mapped::new();
             for (field, rule) in self.schema.fields().iter().zip(&self.rules) {
-                rule.run(field, record, &mut mapped, recorder);
+                match rule {
+                    Some(rule) => rule.run(field, record, &mut mapped, recorder),
+                    None => recorder.field(field.name()),
+                }
             }
             mapped
         })
@@ -58,6 +63,7 @@ impl MapperSpec {
 pub struct MapperSpecBuilder {
     schema: OutputSchema,
     rules: Vec<Rule>,
+    explicit_rules: bool,
 }
 
 impl MapperSpecBuilder {
@@ -66,10 +72,18 @@ impl MapperSpecBuilder {
         self
     }
 
+    /// Leaves a schema field without a rule absent instead of reading the
+    /// source field of the same name. The field is not reported as emptied,
+    /// and [`MapperSpec::explain`] records it with no reads.
+    pub fn explicit_rules(mut self) -> Self {
+        self.explicit_rules = true;
+        self
+    }
+
     /// Fails when a rule targets a field missing from the schema or a field
     /// that already has a rule, or when an op argument is not valid.
     pub fn build(self) -> Result<MapperSpec, SpecError> {
-        let span = telemetry::build_span(&self.schema, self.rules.len());
+        let span = telemetry::build_span(&self.schema, self.rules.len(), self.explicit_rules);
         span.in_scope(|| self.compile().inspect_err(telemetry::spec_error))
     }
 
@@ -89,8 +103,9 @@ impl MapperSpecBuilder {
             .iter()
             .map(
                 |field| match declared.iter().position(|r| r.target == field.name()) {
-                    Some(i) => declared.swap_remove(i).compile(),
-                    None => Rule::new(field.name(), field.name()).compile(),
+                    Some(i) => declared.swap_remove(i).compile().map(Some),
+                    None if self.explicit_rules => Ok(None),
+                    None => Rule::new(field.name(), field.name()).compile().map(Some),
                 },
             )
             .collect::<Result<_, _>>()?;
@@ -104,6 +119,7 @@ impl MapperSpecBuilder {
 #[cfg(test)]
 mod tests {
     use std::borrow::Cow;
+    use std::sync::Arc;
     use std::{panic, thread};
 
     use moldette_core::{
@@ -239,6 +255,15 @@ mod tests {
             spec.map(&padded).get("order_id"),
             Some(Value::Str(Cow::Borrowed("A-1")))
         ));
+        let shared: Arc<dyn Op> = Arc::new(StripPrefix('#'));
+        let shared_spec = MapperSpec::builder(order_schema())
+            .rule(Rule::new("order_id", "raw").trim().via(shared))
+            .build()
+            .expect("valid rule");
+        assert!(matches!(
+            shared_spec.map(&padded).get("order_id"),
+            Some(Value::Str(Cow::Borrowed("A-1")))
+        ));
         let mut owned = FieldRecord::new();
         owned.insert("raw", String::from("#A-1"));
         assert_eq!(
@@ -324,6 +349,11 @@ mod tests {
             ),
             (Rule::new("order_id", "raw").via(Cents), "12.50", None),
             (
+                Rule::new("order_id", "raw").via(Arc::new(Cents) as Arc<dyn Op>),
+                "1250",
+                Some("12.50"),
+            ),
+            (
                 Rule::new("order_id", "raw").via(Cents).split('.', 0),
                 "1250",
                 Some("12"),
@@ -356,6 +386,11 @@ mod tests {
         let rule = Rule::new("amount", "total").via(Cents);
         assert_eq!(rule.clone(), rule);
         assert_ne!(Rule::new("amount", "total").via(Cents), rule);
+
+        let shared: Arc<dyn Op> = Arc::new(Cents);
+        let rule = Rule::new("amount", "total").via(Arc::clone(&shared));
+        assert_eq!(rule.clone(), rule);
+        assert_ne!(Rule::new("amount", "total").via(shared), rule);
     }
 
     #[test]
@@ -465,6 +500,43 @@ mod tests {
         let mapped = spec.map(&FieldRecord::new());
         assert_eq!(mapped.iter().count(), 0);
         assert_eq!(mapped.emptied().count(), 0);
+    }
+
+    #[test]
+    fn explicit_rules_leave_fields_without_a_rule_absent() {
+        let fields = [("order_id", "A-1"), ("quantity", "3"), ("paid", "true")];
+        let builder =
+            || MapperSpec::builder(order_schema()).rule(Rule::new("quantity", "quantity").trim());
+
+        let implicit = builder().build().expect("valid rule");
+        let mapped = implicit.map(&record(&fields));
+        assert_eq!(mapped.get("order_id"), Some(&Value::Str("A-1".into())));
+        assert_eq!(mapped.get("paid"), Some(&Value::Bool(true)));
+
+        let explicit = builder().explicit_rules().build().expect("valid rule");
+        let record = record(&fields);
+        let (mapped, explain) = explicit.explain(&record);
+        assert_eq!(mapped, explicit.map(&record));
+        assert_eq!(
+            mapped.iter().collect::<Vec<_>>(),
+            [("quantity", &Value::Int(3))]
+        );
+        assert_eq!(mapped.emptied().count(), 0);
+        let reads: Vec<_> = explain
+            .fields()
+            .iter()
+            .map(|field| (field.name(), field.reads().len()))
+            .collect();
+        assert_eq!(
+            reads,
+            [
+                ("order_id", 0),
+                ("quantity", 1),
+                ("amount", 0),
+                ("paid", 0),
+                ("ordered_at", 0),
+            ]
+        );
     }
 
     #[test]
@@ -676,7 +748,11 @@ mod tests {
                     .split(' ', 0)
                     .fallback("n"),
             )
-            .rule(Rule::new("amount", "total").via(Cents).fallback("subtotal"))
+            .rule(
+                Rule::new("amount", "total")
+                    .via(Arc::new(Cents) as Arc<dyn Op>)
+                    .fallback("subtotal"),
+            )
             .rule(Rule::constant("currency", "usd").lookup([("usd", "USD")]))
             .build()
             .expect("valid rules");
