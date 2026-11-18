@@ -5,10 +5,12 @@
 //! one spec can be shared across threads (#8). Values stay text; type
 //! conversion belongs to the mapper (#3).
 
+mod custom;
 mod delimited;
 mod json;
 mod kv;
 mod regex;
 mod spec;
 
+pub use custom::{CustomFormat, Parser};
 pub use spec::{Format, ParserSpec, ParserSpecBuilder};
