@@ -7,7 +7,7 @@
 //! emptied (#5).
 //!
 //! With the `tracing` feature, building a spec runs in an `INFO` span
-//! `moldette.mapper.build` that reports a failure as a `WARN` event
+//! `moldette.mapper.build` that reports a failure as a `DEBUG` event
 //! `moldette.mapper.spec_error`. Each record is mapped in a `TRACE` span
 //! `moldette.mapper.map` with a `TRACE` event `moldette.mapper.emptied` per
 //! emptied field.

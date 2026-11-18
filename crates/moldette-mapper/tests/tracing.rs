@@ -193,7 +193,7 @@ fn failed_build_emits_spec_error_inside_the_build_span() {
             ),
             signal(
                 "moldette.mapper.spec_error",
-                Level::WARN,
+                Level::DEBUG,
                 Some("moldette.mapper.build"),
                 &[(
                     "moldette.error",

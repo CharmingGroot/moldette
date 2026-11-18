@@ -21,7 +21,7 @@ mod enabled {
     pub(crate) fn spec_error(err: &SpecError) {
         event!(
             name: "moldette.mapper.spec_error",
-            Level::WARN,
+            Level::DEBUG,
             moldette.error = %err,
         );
     }
