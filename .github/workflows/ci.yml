@@ -70,6 +70,16 @@ jobs:
       - run: cargo clippy -p ${{ matrix.crate }} --all-targets --all-features
       - run: cargo test -p ${{ matrix.crate }} --all-features
       - run: cargo build -p ${{ matrix.crate }} --target wasm32-unknown-unknown --all-features
+      - name: Each feature alone, for crates with default features
+        run: |
+          features=$(cargo metadata --format-version 1 --no-deps | jq -r --arg crate "${{ matrix.crate }}" \
+            '.packages[] | select(.name == $crate) | .features | select(has("default")) | keys[] | select(. != "default")')
+          if [ -n "$features" ]; then
+            cargo clippy -p ${{ matrix.crate }} --all-targets --no-default-features
+            for feature in $features; do
+              cargo clippy -p ${{ matrix.crate }} --all-targets --no-default-features --features "$feature"
+            done
+          fi
 
   deny:
     needs: changes
