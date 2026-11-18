@@ -94,16 +94,10 @@ impl CustomPaths {
     pub(crate) fn find<'a>(&self, raw: &'a str) -> Result<Vec<Option<Cow<'a, str>>>, Malformed> {
         self.0.find(without_line_break(raw))
     }
-
-    pub(crate) fn name(&self) -> &str {
-        self.0.format_name()
-    }
 }
 
 trait FindValues: fmt::Debug + Send + Sync + RefUnwindSafe {
     fn find<'a>(&self, raw: &'a str) -> Result<Vec<Option<Cow<'a, str>>>, Malformed>;
-
-    fn format_name(&self) -> &str;
 }
 
 #[derive(Debug)]
@@ -117,9 +111,5 @@ impl<P: Parser> FindValues for Resolved<P> {
         let mut values = vec![None; self.paths.len()];
         self.parser.read(raw, &self.paths, &mut values)?;
         Ok(values)
-    }
-
-    fn format_name(&self) -> &str {
-        self.parser.name()
     }
 }

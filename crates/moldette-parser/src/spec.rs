@@ -69,6 +69,7 @@ impl Format {
 /// built.
 #[derive(Debug, Clone)]
 pub struct ParserSpec {
+    format: Format,
     names: Vec<String>,
     paths: Paths,
     bodies: Vec<Body>,
@@ -104,7 +105,7 @@ impl ParserSpec {
     /// Parses one raw record. Values borrow from `raw` where possible, and a
     /// missing or null value is left absent.
     pub fn parse<'a>(&'a self, raw: &'a str) -> Result<FieldRecord<'a>, Malformed> {
-        telemetry::parse_span(|| self.paths.name()).in_scope(|| {
+        telemetry::parse_span(|| self.format.name()).in_scope(|| {
             let mut record = FieldRecord::with_capacity(self.field_count);
             self.read(raw, &mut |name, value| record.insert(name, value))?;
             Ok(record)
@@ -119,7 +120,7 @@ impl ParserSpec {
         let mut values = self
             .paths
             .find(raw)
-            .inspect_err(|_| telemetry::malformed(|| self.paths.name()))?
+            .inspect_err(|_| telemetry::malformed(|| self.format.name()))?
             .into_iter()
             .map(|value| value.filter(|value| !(self.empty_as_none && value.is_empty())));
         for (name, value) in self.names.iter().zip(values.by_ref()) {
@@ -129,7 +130,7 @@ impl ParserSpec {
         }
         for (body, text) in self.bodies.iter().zip(values) {
             let Some(text) = text else { continue };
-            telemetry::body_span(&body.path, || body.spec.paths.name())
+            telemetry::body_span(&body.path, || body.spec.format.name())
                 .in_scope(|| match text {
                     Cow::Borrowed(text) => body.spec.read(text, sink),
                     Cow::Owned(text) => body.spec.read(&text, &mut |name, value| {
@@ -176,16 +177,6 @@ impl Paths {
             Self::Regex(groups) => groups.find(raw),
             Self::Kv(keys) => keys.find(raw),
             Self::Custom(paths) => paths.find(raw),
-        }
-    }
-
-    fn name(&self) -> &str {
-        match self {
-            Self::Json(_) => "json",
-            Self::Delimited(_) => "delimited",
-            Self::Regex(_) => "regex",
-            Self::Kv(_) => "kv",
-            Self::Custom(paths) => paths.name(),
         }
     }
 }
@@ -237,7 +228,8 @@ impl ParserSpecBuilder {
         paths.extend(self.bodies.iter().map(|(path, _)| path.clone()));
         Ok(ParserSpec {
             names,
-            paths: Paths::new(self.format, &paths)?,
+            paths: Paths::new(self.format.clone(), &paths)?,
+            format: self.format,
             bodies: self
                 .bodies
                 .into_iter()

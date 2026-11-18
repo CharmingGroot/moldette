@@ -47,8 +47,8 @@ fn build_and_map_emit_spans_and_emptied_events_without_record_values() {
                     ("moldette.mapper.explicit_rules", "false"),
                 ],
             ),
-            signal("moldette.mapper.map", Level::TRACE, None, &schema_fields),
-            signal(
+            Signal::new("moldette.mapper.map", Level::TRACE, None, &schema_fields),
+            Signal::new(
                 "moldette.mapper.emptied",
                 Level::TRACE,
                 Some("moldette.mapper.map"),
@@ -81,7 +81,7 @@ fn explicit_rules_are_reported_at_build_and_fields_without_a_rule_emit_no_event(
     assert_eq!(
         signals,
         [
-            signal(
+            Signal::new(
                 "moldette.mapper.build",
                 Level::INFO,
                 None,
