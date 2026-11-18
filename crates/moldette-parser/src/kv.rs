@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use moldette_core::{Malformed, SpecError};
 
-use crate::delimited::without_line_break;
+use crate::text::without_line_break;
 
 const QUOTE: char = '"';
 const BACKSLASH: char = '\\';

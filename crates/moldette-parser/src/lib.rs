@@ -21,6 +21,7 @@ mod kv;
 mod regex;
 mod spec;
 mod telemetry;
+mod text;
 
 pub use custom::{CustomFormat, Parser};
 pub use spec::{Format, ParserSpec, ParserSpecBuilder};

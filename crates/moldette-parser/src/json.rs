@@ -7,6 +7,8 @@ use serde::de::{
 };
 use serde_json::value::RawValue;
 
+use crate::text::array_index;
+
 #[derive(Debug, Clone)]
 pub(crate) struct JsonPaths {
     root: Node,
@@ -125,14 +127,6 @@ impl Node {
     fn element(&self, index: usize) -> Option<&Child> {
         self.children.iter().find(|c| c.index == Some(index))
     }
-}
-
-pub(crate) fn array_index(token: &str) -> Option<usize> {
-    let leading_zero = token.len() > 1 && token.starts_with('0');
-    if leading_zero || !token.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
-    token.parse().ok()
 }
 
 struct Walk<'s, 'a> {

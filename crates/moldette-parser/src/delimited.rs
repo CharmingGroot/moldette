@@ -3,7 +3,7 @@ use std::iter;
 
 use moldette_core::{Malformed, SpecError};
 
-use crate::json::array_index;
+use crate::text::{array_index, without_line_break};
 
 const QUOTE: char = '"';
 
@@ -79,12 +79,6 @@ impl DelimitedColumns {
             }),
         }
     }
-}
-
-pub(crate) fn without_line_break(raw: &str) -> &str {
-    raw.strip_suffix("\r\n")
-        .or_else(|| raw.strip_suffix('\n'))
-        .unwrap_or(raw)
 }
 
 fn unquote(quoted: &str) -> Result<(Cow<'_, str>, &str), Malformed> {

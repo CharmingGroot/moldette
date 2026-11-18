@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use moldette_core::{Malformed, SpecError};
 
-use crate::delimited::without_line_break;
+use crate::text::without_line_break;
 
 /// A record format defined by the caller and used with
 /// [`Format::custom`](crate::Format::custom).
