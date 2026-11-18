@@ -7,6 +7,7 @@ use crate::delimited::DelimitedColumns;
 use crate::json::{self, JsonPaths};
 use crate::kv::KvKeys;
 use crate::regex::RegexGroups;
+use crate::telemetry;
 
 /// The format of the raw records a spec parses.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,6 +53,16 @@ impl Format {
     pub fn custom(parser: impl Parser + 'static) -> Self {
         Self::Custom(CustomFormat::new(parser))
     }
+
+    fn name(&self) -> &str {
+        match self {
+            Self::Json => "json",
+            Self::Delimited { .. } => "delimited",
+            Self::Regex { .. } => "regex",
+            Self::Kv { .. } => "kv",
+            Self::Custom(format) => format.name(),
+        }
+    }
 }
 
 /// A validated description of how to parse raw records. Immutable once
@@ -93,9 +104,11 @@ impl ParserSpec {
     /// Parses one raw record. Values borrow from `raw` where possible, and a
     /// missing or null value is left absent.
     pub fn parse<'a>(&'a self, raw: &'a str) -> Result<FieldRecord<'a>, Malformed> {
-        let mut record = FieldRecord::with_capacity(self.field_count);
-        self.read(raw, &mut |name, value| record.insert(name, value))?;
-        Ok(record)
+        telemetry::parse_span(|| self.paths.name()).in_scope(|| {
+            let mut record = FieldRecord::with_capacity(self.field_count);
+            self.read(raw, &mut |name, value| record.insert(name, value))?;
+            Ok(record)
+        })
     }
 
     fn read<'s, 't>(
@@ -105,7 +118,8 @@ impl ParserSpec {
     ) -> Result<(), Malformed> {
         let mut values = self
             .paths
-            .find(raw)?
+            .find(raw)
+            .inspect_err(|_| telemetry::malformed(|| self.paths.name()))?
             .into_iter()
             .map(|value| value.filter(|value| !(self.empty_as_none && value.is_empty())));
         for (name, value) in self.names.iter().zip(values.by_ref()) {
@@ -114,14 +128,15 @@ impl ParserSpec {
             }
         }
         for (body, text) in self.bodies.iter().zip(values) {
-            match text {
-                Some(Cow::Borrowed(text)) => body.spec.read(text, sink),
-                Some(Cow::Owned(text)) => body.spec.read(&text, &mut |name, value| {
-                    sink(name, Cow::Owned(value.into_owned()));
-                }),
-                None => Ok(()),
-            }
-            .map_err(|err| Malformed::new(format!("body `{}`: {err}", body.path)))?;
+            let Some(text) = text else { continue };
+            telemetry::body_span(&body.path, || body.spec.paths.name())
+                .in_scope(|| match text {
+                    Cow::Borrowed(text) => body.spec.read(text, sink),
+                    Cow::Owned(text) => body.spec.read(&text, &mut |name, value| {
+                        sink(name, Cow::Owned(value.into_owned()));
+                    }),
+                })
+                .map_err(|err| Malformed::new(format!("body `{}`: {err}", body.path)))?;
         }
         Ok(())
     }
@@ -163,6 +178,16 @@ impl Paths {
             Self::Custom(paths) => paths.find(raw),
         }
     }
+
+    fn name(&self) -> &str {
+        match self {
+            Self::Json(_) => "json",
+            Self::Delimited(_) => "delimited",
+            Self::Regex(_) => "regex",
+            Self::Kv(_) => "kv",
+            Self::Custom(paths) => paths.name(),
+        }
+    }
 }
 
 pub struct ParserSpecBuilder {
@@ -196,6 +221,12 @@ impl ParserSpecBuilder {
     }
 
     pub fn build(self) -> Result<ParserSpec, SpecError> {
+        let span =
+            telemetry::build_span(|| self.format.name(), self.fields.len(), self.bodies.len());
+        span.in_scope(|| self.compile().inspect_err(telemetry::spec_error))
+    }
+
+    fn compile(self) -> Result<ParserSpec, SpecError> {
         let mut names: Vec<&str> = self.fields.iter().map(|(name, _)| name.as_str()).collect();
         for (_, spec) in &self.bodies {
             spec.collect_names(&mut names);

@@ -13,3 +13,11 @@ moldette-core = { path = "../moldette-core" }
 regex = "1.13.1"
 serde = "1.0.229"
 serde_json = { version = "1.0.154", features = ["raw_value"] }
+tracing = { workspace = true, optional = true }
+
+[dev-dependencies]
+moldette-test-tracing = { path = "../moldette-test-tracing" }
+tracing = { workspace = true }
+
+[features]
+tracing = ["dep:tracing"]

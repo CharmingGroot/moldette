@@ -47,6 +47,10 @@ impl CustomFormat {
     pub(crate) fn resolve(&self, paths: &[String]) -> Result<CustomPaths, SpecError> {
         Arc::clone(&self.0).resolve(paths)
     }
+
+    pub(crate) fn name(&self) -> &str {
+        self.0.format_name()
+    }
 }
 
 impl PartialEq for CustomFormat {
@@ -59,6 +63,8 @@ impl Eq for CustomFormat {}
 
 trait ResolvePaths: fmt::Debug + Send + Sync + RefUnwindSafe {
     fn resolve(self: Arc<Self>, paths: &[String]) -> Result<CustomPaths, SpecError>;
+
+    fn format_name(&self) -> &str;
 }
 
 impl<P: Parser + 'static> ResolvePaths for P {
@@ -75,6 +81,10 @@ impl<P: Parser + 'static> ResolvePaths for P {
             paths,
         })))
     }
+
+    fn format_name(&self) -> &str {
+        self.name()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -84,10 +94,16 @@ impl CustomPaths {
     pub(crate) fn find<'a>(&self, raw: &'a str) -> Result<Vec<Option<Cow<'a, str>>>, Malformed> {
         self.0.find(without_line_break(raw))
     }
+
+    pub(crate) fn name(&self) -> &str {
+        self.0.format_name()
+    }
 }
 
 trait FindValues: fmt::Debug + Send + Sync + RefUnwindSafe {
     fn find<'a>(&self, raw: &'a str) -> Result<Vec<Option<Cow<'a, str>>>, Malformed>;
+
+    fn format_name(&self) -> &str;
 }
 
 #[derive(Debug)]
@@ -101,5 +117,9 @@ impl<P: Parser> FindValues for Resolved<P> {
         let mut values = vec![None; self.paths.len()];
         self.parser.read(raw, &self.paths, &mut values)?;
         Ok(values)
+    }
+
+    fn format_name(&self) -> &str {
+        self.parser.name()
     }
 }

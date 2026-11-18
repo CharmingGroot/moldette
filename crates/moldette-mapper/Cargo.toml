@@ -15,7 +15,8 @@ time = { version = "0.3.55", default-features = false, features = ["formatting",
 tracing = { workspace = true, optional = true }
 
 [dev-dependencies]
-tracing = { workspace = true, features = ["std"] }
+moldette-test-tracing = { path = "../moldette-test-tracing" }
+tracing = { workspace = true }
 
 [features]
 tracing = ["dep:tracing"]
