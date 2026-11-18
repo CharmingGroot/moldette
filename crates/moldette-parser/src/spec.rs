@@ -2,6 +2,7 @@ use std::borrow::Cow;
 
 use moldette_core::{FieldRecord, Malformed, SpecError, validate_field_names};
 
+use crate::custom::{CustomFormat, CustomPaths, Parser};
 use crate::delimited::DelimitedColumns;
 use crate::json::{self, JsonPaths};
 use crate::kv::KvKeys;
@@ -41,6 +42,16 @@ pub enum Format {
         pair_delimiter: char,
         key_value_delimiter: char,
     },
+    /// One record read by a [`Parser`] defined by the caller. A field path is
+    /// resolved by [`Parser::path`] when the spec is built, and a trailing
+    /// line break is removed before [`Parser::read`].
+    Custom(CustomFormat),
+}
+
+impl Format {
+    pub fn custom(parser: impl Parser + 'static) -> Self {
+        Self::Custom(CustomFormat::new(parser))
+    }
 }
 
 /// A validated description of how to parse raw records. Immutable once
@@ -60,6 +71,7 @@ enum Paths {
     Delimited(DelimitedColumns),
     Regex(RegexGroups),
     Kv(KvKeys),
+    Custom(CustomPaths),
 }
 
 #[derive(Debug, Clone)]
@@ -134,6 +146,7 @@ impl Paths {
                 pair_delimiter,
                 key_value_delimiter,
             } => Self::Kv(KvKeys::new(pair_delimiter, key_value_delimiter, paths)?),
+            Format::Custom(format) => Self::Custom(format.resolve(paths)?),
         })
     }
 
@@ -147,6 +160,7 @@ impl Paths {
             Self::Delimited(columns) => columns.find(raw),
             Self::Regex(groups) => groups.find(raw),
             Self::Kv(keys) => keys.find(raw),
+            Self::Custom(paths) => paths.find(raw),
         }
     }
 }
@@ -207,6 +221,8 @@ impl ParserSpecBuilder {
 #[cfg(test)]
 mod tests {
     use std::borrow::Cow;
+    use std::ops::Range;
+    use std::panic::{self, RefUnwindSafe, UnwindSafe};
     use std::thread;
 
     use super::*;
@@ -237,6 +253,77 @@ mod tests {
     const APP_LINE: &str = r#"2026-11-18T10:00:00Z app[42]: {"order_id":"A-1","amount":12.5}"#;
 
     const APP_HEADER: &str = r"^(?P<time>\S+) (?P<app>[^\[]+)\[(?P<pid>\d+)\]:(?: (?P<body>.*))?$";
+
+    const ORDER_LAYOUT: FixedWidth = FixedWidth(&[
+        ("order_id", 0..6),
+        ("status", 6..14),
+        ("amount", 14..22),
+        ("items", 22..30),
+    ]);
+
+    const FIXED_ORDER: &str = "A-1   paid    12.50   B-7;C-3 ";
+
+    #[derive(Debug)]
+    struct FixedWidth(&'static [(&'static str, Range<usize>)]);
+
+    impl Parser for FixedWidth {
+        type Path = Range<usize>;
+
+        fn name(&self) -> &str {
+            "fixed_width"
+        }
+
+        fn path(&self, path: &str) -> Option<Range<usize>> {
+            self.0
+                .iter()
+                .find(|(name, _)| *name == path)
+                .map(|(_, columns)| columns.clone())
+        }
+
+        fn read<'a>(
+            &self,
+            raw: &'a str,
+            paths: &[Range<usize>],
+            values: &mut [Option<Cow<'a, str>>],
+        ) -> Result<(), Malformed> {
+            let width = self.0.iter().map(|(_, columns)| columns.end).max();
+            if Some(raw.len()) != width {
+                return Err(Malformed::new("record width differs from the layout"));
+            }
+            for (columns, value) in paths.iter().zip(values) {
+                *value = raw
+                    .get(columns.clone())
+                    .map(|text| Cow::Borrowed(text.trim_end()));
+            }
+            Ok(())
+        }
+    }
+
+    #[derive(Debug)]
+    struct PanicsOnEmpty;
+
+    impl Parser for PanicsOnEmpty {
+        type Path = ();
+
+        fn name(&self) -> &str {
+            "panics_on_empty"
+        }
+
+        fn path(&self, _: &str) -> Option<()> {
+            Some(())
+        }
+
+        fn read<'a>(
+            &self,
+            raw: &'a str,
+            _: &[()],
+            values: &mut [Option<Cow<'a, str>>],
+        ) -> Result<(), Malformed> {
+            assert!(!raw.is_empty(), "empty record");
+            values.fill(Some(Cow::Borrowed(raw)));
+            Ok(())
+        }
+    }
 
     fn regex(pattern: &str) -> Format {
         Format::Regex {
@@ -523,6 +610,20 @@ mod tests {
             })
             .collect();
         assert_same_records_across_threads(&composed, &inputs);
+
+        let custom = ParserSpec::builder(Format::custom(ORDER_LAYOUT))
+            .field("order_id", "order_id")
+            .field("amount", "amount")
+            .body(
+                "items",
+                spec(Format::Delimited { delimiter: ';' }, &[("sku", "1")]),
+            )
+            .build()
+            .expect("valid spec");
+        let inputs: Vec<String> = (0..64)
+            .map(|i| format!("A-{i:<4}paid    {i:<8}B-7;C-{i:<2}"))
+            .collect();
+        assert_same_records_across_threads(&custom, &inputs);
     }
 
     #[test]
@@ -1196,9 +1297,174 @@ mod tests {
     }
 
     #[test]
+    fn custom_reads_values_at_paths_resolved_at_build() {
+        let spec = ParserSpec::builder(Format::custom(ORDER_LAYOUT))
+            .field("amount", "amount")
+            .field("order_id", "order_id")
+            .field("reference", "order_id")
+            .field("status", "status")
+            .build()
+            .expect("valid spec");
+        for raw in [
+            FIXED_ORDER.to_owned(),
+            format!("{FIXED_ORDER}\n"),
+            format!("{FIXED_ORDER}\r\n"),
+        ] {
+            let record = spec.parse(&raw).expect("valid record");
+            assert_eq!(
+                fields(&record),
+                [
+                    ("amount", "12.50"),
+                    ("order_id", "A-1"),
+                    ("reference", "A-1"),
+                    ("status", "paid"),
+                ],
+                "{raw:?}"
+            );
+            assert!(matches!(
+                record.get_cow("order_id"),
+                Some(Cow::Borrowed("A-1"))
+            ));
+        }
+        assert!(spec.parse("A-1   paid").is_err());
+    }
+
+    #[test]
+    fn custom_empty_as_none_leaves_blank_columns_absent() {
+        let raw = FIXED_ORDER.replace("paid", "    ");
+        let strict = spec(
+            Format::custom(ORDER_LAYOUT),
+            &[("order_id", "order_id"), ("status", "status")],
+        );
+        let record = strict.parse(&raw).expect("valid record");
+        assert_eq!(fields(&record), [("order_id", "A-1"), ("status", "")]);
+
+        let lenient = ParserSpec::builder(Format::custom(ORDER_LAYOUT))
+            .field("order_id", "order_id")
+            .field("status", "status")
+            .empty_as_none()
+            .build()
+            .expect("valid spec");
+        let record = lenient.parse(&raw).expect("valid record");
+        assert_eq!(fields(&record), [("order_id", "A-1")]);
+    }
+
+    #[test]
+    fn custom_rejects_paths_the_parser_does_not_resolve() {
+        for path in ["", "0", "0..6", "customer"] {
+            let result = ParserSpec::builder(Format::custom(ORDER_LAYOUT))
+                .field("order_id", path)
+                .build();
+            assert_eq!(
+                result.map(|_| ()),
+                Err(SpecError::InvalidPath(path.into())),
+                "{path:?}"
+            );
+        }
+        let body = spec(Format::Json, &[("order_id", "/order_id")]);
+        let result = ParserSpec::builder(Format::custom(ORDER_LAYOUT))
+            .body("message", body)
+            .build();
+        assert_eq!(
+            result.map(|_| ()),
+            Err(SpecError::InvalidPath("message".into()))
+        );
+    }
+
+    #[test]
+    fn custom_formats_are_equal_only_when_they_share_the_parser() {
+        let format = Format::custom(ORDER_LAYOUT);
+        assert_eq!(format.clone(), format);
+        assert_ne!(Format::custom(ORDER_LAYOUT), format);
+    }
+
+    #[test]
+    fn compose_reads_custom_header_and_custom_body() {
+        let header = ParserSpec::builder(Format::custom(ORDER_LAYOUT))
+            .field("order_id", "order_id")
+            .body(
+                "items",
+                spec(
+                    Format::Delimited { delimiter: ';' },
+                    &[("first_sku", "0"), ("second_sku", "1")],
+                ),
+            )
+            .build()
+            .expect("valid spec");
+        let record = header.parse(FIXED_ORDER).expect("valid record");
+        assert_eq!(
+            fields(&record),
+            [
+                ("order_id", "A-1"),
+                ("first_sku", "B-7"),
+                ("second_sku", "C-3")
+            ]
+        );
+        assert!(matches!(
+            record.get_cow("second_sku"),
+            Some(Cow::Borrowed("C-3"))
+        ));
+
+        let body = ParserSpec::builder(Format::Json)
+            .field("time", "/time")
+            .body(
+                "/record",
+                spec(
+                    Format::custom(ORDER_LAYOUT),
+                    &[("order_id", "order_id"), ("status", "status")],
+                ),
+            )
+            .build()
+            .expect("valid spec");
+        let raw = format!(r#"{{"time": "2026-11-18T10:00:00Z", "record": "{FIXED_ORDER}"}}"#);
+        let record = body.parse(&raw).expect("valid record");
+        assert_eq!(
+            fields(&record),
+            [
+                ("time", "2026-11-18T10:00:00Z"),
+                ("order_id", "A-1"),
+                ("status", "paid")
+            ]
+        );
+        assert!(matches!(
+            record.get_cow("status"),
+            Some(Cow::Borrowed("paid"))
+        ));
+
+        let escaped = raw.replace("paid", r"\u0070aid");
+        let record = body.parse(&escaped).expect("valid record");
+        assert!(matches!(
+            record.get_cow("status"),
+            Some(Cow::Owned(status)) if status == "paid"
+        ));
+
+        let err = body
+            .parse(r#"{"record": "A-1   paid"}"#)
+            .expect_err("malformed body");
+        assert!(err.reason().starts_with("body `/record`: "));
+    }
+
+    #[test]
+    fn custom_parser_panic_reaches_the_caller_and_leaves_the_spec_usable() {
+        let spec = spec(Format::custom(PanicsOnEmpty), &[("order_id", "any")]);
+        assert!(panic::catch_unwind(|| spec.parse("").map(FieldRecord::into_owned)).is_err());
+
+        let record = spec.parse("A-1\n").expect("valid record");
+        assert_eq!(fields(&record), [("order_id", "A-1")]);
+    }
+
+    #[test]
     fn public_types_are_send_and_sync() {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<ParserSpec>();
         assert_send_sync::<ParserSpecBuilder>();
+        assert_send_sync::<Format>();
+    }
+
+    #[test]
+    fn spec_stays_unwind_safe_with_custom_parsers() {
+        fn assert_unwind_safe<T: UnwindSafe + RefUnwindSafe>() {}
+        assert_unwind_safe::<ParserSpec>();
+        assert_unwind_safe::<Format>();
     }
 }
