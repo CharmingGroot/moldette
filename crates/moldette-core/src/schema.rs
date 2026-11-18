@@ -1,4 +1,4 @@
-use crate::SpecError;
+use crate::{SpecError, validate_field_names};
 
 /// Types an output field can have.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -103,14 +103,7 @@ impl OutputSchemaBuilder {
     }
 
     pub fn build(self) -> Result<OutputSchema, SpecError> {
-        for (i, field) in self.schema.fields.iter().enumerate() {
-            if field.name.is_empty() {
-                return Err(SpecError::EmptyFieldName);
-            }
-            if self.schema.fields[..i].iter().any(|f| f.name == field.name) {
-                return Err(SpecError::DuplicateField(field.name.clone()));
-            }
-        }
+        validate_field_names(self.schema.fields.iter().map(Field::name))?;
         Ok(self.schema)
     }
 }

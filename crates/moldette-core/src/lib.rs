@@ -9,6 +9,7 @@
 
 mod error;
 mod mapped;
+mod names;
 mod record;
 mod response;
 mod schema;
@@ -17,6 +18,7 @@ mod value;
 
 pub use error::SpecError;
 pub use mapped::Mapped;
+pub use names::validate_field_names;
 pub use record::FieldRecord;
 pub use response::{Malformed, Response};
 pub use schema::{Field, OutputSchema, OutputSchemaBuilder, Type};
