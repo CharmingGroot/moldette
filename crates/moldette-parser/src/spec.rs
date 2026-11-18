@@ -49,6 +49,8 @@ pub enum Format {
 pub struct ParserSpec {
     names: Vec<String>,
     paths: Paths,
+    bodies: Vec<Body>,
+    field_count: usize,
     empty_as_none: bool,
 }
 
@@ -60,11 +62,18 @@ enum Paths {
     Kv(KvKeys),
 }
 
+#[derive(Debug, Clone)]
+struct Body {
+    path: String,
+    spec: ParserSpec,
+}
+
 impl ParserSpec {
     pub fn builder(format: Format) -> ParserSpecBuilder {
         ParserSpecBuilder {
             format,
             fields: Vec::new(),
+            bodies: Vec::new(),
             empty_as_none: false,
         }
     }
@@ -72,30 +81,72 @@ impl ParserSpec {
     /// Parses one raw record. Values borrow from `raw` where possible, and a
     /// missing or null value is left absent.
     pub fn parse<'a>(&'a self, raw: &'a str) -> Result<FieldRecord<'a>, Malformed> {
-        let mut record = FieldRecord::with_capacity(self.names.len());
-        match &self.paths {
-            Paths::Json(paths) => {
-                for (name, text) in self.names.iter().zip(paths.find(raw)?) {
-                    let value = text.map(json::field_value).transpose()?.flatten();
-                    self.insert(&mut record, name, value);
-                }
-            }
-            Paths::Delimited(columns) => self.insert_all(&mut record, columns.find(raw)?),
-            Paths::Regex(groups) => self.insert_all(&mut record, groups.find(raw)?),
-            Paths::Kv(keys) => self.insert_all(&mut record, keys.find(raw)?),
-        }
+        let mut record = FieldRecord::with_capacity(self.field_count);
+        self.read(raw, &mut |name, value| record.insert(name, value))?;
         Ok(record)
     }
 
-    fn insert_all<'a>(&'a self, record: &mut FieldRecord<'a>, values: Vec<Option<Cow<'a, str>>>) {
-        for (name, value) in self.names.iter().zip(values) {
-            self.insert(record, name, value);
+    fn read<'s, 't>(
+        &'s self,
+        raw: &'t str,
+        sink: &mut dyn FnMut(&'s str, Cow<'t, str>),
+    ) -> Result<(), Malformed> {
+        let mut values = self
+            .paths
+            .find(raw)?
+            .into_iter()
+            .map(|value| value.filter(|value| !(self.empty_as_none && value.is_empty())));
+        for (name, value) in self.names.iter().zip(values.by_ref()) {
+            if let Some(value) = value {
+                sink(name, value);
+            }
         }
+        for (body, text) in self.bodies.iter().zip(values) {
+            match text {
+                Some(Cow::Borrowed(text)) => body.spec.read(text, sink),
+                Some(Cow::Owned(text)) => body.spec.read(&text, &mut |name, value| {
+                    sink(name, Cow::Owned(value.into_owned()));
+                }),
+                None => Ok(()),
+            }
+            .map_err(|err| Malformed::new(format!("body `{}`: {err}", body.path)))?;
+        }
+        Ok(())
     }
 
-    fn insert<'a>(&self, record: &mut FieldRecord<'a>, name: &'a str, value: Option<Cow<'a, str>>) {
-        if let Some(value) = value.filter(|value| !(self.empty_as_none && value.is_empty())) {
-            record.insert(name, value);
+    fn collect_names<'s>(&'s self, names: &mut Vec<&'s str>) {
+        names.extend(self.names.iter().map(String::as_str));
+        for body in &self.bodies {
+            body.spec.collect_names(names);
+        }
+    }
+}
+
+impl Paths {
+    fn new(format: Format, paths: &[String]) -> Result<Self, SpecError> {
+        Ok(match format {
+            Format::Json => Self::Json(JsonPaths::new(paths)?),
+            Format::Delimited { delimiter } => {
+                Self::Delimited(DelimitedColumns::new(delimiter, paths)?)
+            }
+            Format::Regex { pattern } => Self::Regex(RegexGroups::new(&pattern, paths)?),
+            Format::Kv {
+                pair_delimiter,
+                key_value_delimiter,
+            } => Self::Kv(KvKeys::new(pair_delimiter, key_value_delimiter, paths)?),
+        })
+    }
+
+    fn find<'t>(&self, raw: &'t str) -> Result<Vec<Option<Cow<'t, str>>>, Malformed> {
+        match self {
+            Self::Json(paths) => paths
+                .find(raw)?
+                .into_iter()
+                .map(|text| text.map(json::field_value).transpose().map(Option::flatten))
+                .collect(),
+            Self::Delimited(columns) => columns.find(raw),
+            Self::Regex(groups) => groups.find(raw),
+            Self::Kv(keys) => keys.find(raw),
         }
     }
 }
@@ -103,6 +154,7 @@ impl ParserSpec {
 pub struct ParserSpecBuilder {
     format: Format,
     fields: Vec<(String, String)>,
+    bodies: Vec<(String, ParserSpec)>,
     empty_as_none: bool,
 }
 
@@ -114,29 +166,45 @@ impl ParserSpecBuilder {
         self
     }
 
+    /// Parses the text at `path` with `spec`, a body in a format of its own,
+    /// and appends the fields of `spec` after the fields of this spec. The
+    /// path uses the notation of this spec's format; a regex group such as
+    /// `(?P<body>.*)` takes the rest of a record. A path without a value
+    /// leaves the body fields absent, and a body that `spec` cannot parse
+    /// makes the record malformed. Body values borrow from the raw record
+    /// unless the text at `path` was unescaped. Field names must be unique
+    /// across this spec and its bodies.
+    pub fn body(mut self, path: impl Into<String>, spec: ParserSpec) -> Self {
+        self.bodies.push((path.into(), spec));
+        self
+    }
+
     /// Leaves empty strings absent instead of returning them as values (#13).
+    /// This also covers the text at a body path, while a body spec applies its
+    /// own setting to its fields.
     pub fn empty_as_none(mut self) -> Self {
         self.empty_as_none = true;
         self
     }
 
     pub fn build(self) -> Result<ParserSpec, SpecError> {
-        validate_field_names(self.fields.iter().map(|(name, _)| name.as_str()))?;
-        let (names, paths): (_, Vec<String>) = self.fields.into_iter().unzip();
-        let paths = match self.format {
-            Format::Json => Paths::Json(JsonPaths::new(&paths)?),
-            Format::Delimited { delimiter } => {
-                Paths::Delimited(DelimitedColumns::new(delimiter, &paths)?)
-            }
-            Format::Regex { pattern } => Paths::Regex(RegexGroups::new(&pattern, &paths)?),
-            Format::Kv {
-                pair_delimiter,
-                key_value_delimiter,
-            } => Paths::Kv(KvKeys::new(pair_delimiter, key_value_delimiter, &paths)?),
-        };
+        let mut names: Vec<&str> = self.fields.iter().map(|(name, _)| name.as_str()).collect();
+        for (_, spec) in &self.bodies {
+            spec.collect_names(&mut names);
+        }
+        validate_field_names(names.iter().copied())?;
+        let field_count = names.len();
+        let (names, mut paths): (_, Vec<String>) = self.fields.into_iter().unzip();
+        paths.extend(self.bodies.iter().map(|(path, _)| path.clone()));
         Ok(ParserSpec {
             names,
-            paths,
+            paths: Paths::new(self.format, &paths)?,
+            bodies: self
+                .bodies
+                .into_iter()
+                .map(|(path, spec)| Body { path, spec })
+                .collect(),
+            field_count,
             empty_as_none: self.empty_as_none,
         })
     }
@@ -171,6 +239,10 @@ mod tests {
     };
 
     const APP_LOG: &str = r#"ts=2026-11-18T10:15:32Z level=info msg="order paid" order_id=A-1 amount=12.50 path=/orders?id=A-1"#;
+
+    const APP_LINE: &str = r#"2026-11-18T10:00:00Z app[42]: {"order_id":"A-1","amount":12.5}"#;
+
+    const APP_HEADER: &str = r"^(?P<time>\S+) (?P<app>[^\[]+)\[(?P<pid>\d+)\]:(?: (?P<body>.*))?$";
 
     fn regex(pattern: &str) -> Format {
         Format::Regex {
@@ -437,6 +509,26 @@ mod tests {
             .map(|i| format!(r#"level=info msg="say \"{i}\"" order_id=A-{i}"#))
             .collect();
         assert_same_records_across_threads(&app_log, &inputs);
+
+        let composed = ParserSpec::builder(regex(APP_HEADER))
+            .field("pid", "pid")
+            .body(
+                "body",
+                spec(
+                    Format::Json,
+                    &[("order_id", "/order_id"), ("note", "/note")],
+                ),
+            )
+            .build()
+            .expect("valid spec");
+        let inputs: Vec<String> = (0..64)
+            .map(|i| {
+                format!(
+                    r#"2026-11-18T10:00:00Z app[{i}]: {{"order_id":"A-{i}","note":"say \"{i}\""}}"#
+                )
+            })
+            .collect();
+        assert_same_records_across_threads(&composed, &inputs);
     }
 
     #[test]
@@ -894,6 +986,217 @@ mod tests {
                 result.map(|_| ()),
                 Err(SpecError::InvalidPath(column.into())),
                 "{column:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn compose_appends_body_fields_after_header_fields() {
+        let body = spec(
+            Format::Json,
+            &[("order_id", "/order_id"), ("amount", "/amount")],
+        );
+        let spec = ParserSpec::builder(regex(APP_HEADER))
+            .field("time", "time")
+            .field("app", "app")
+            .field("message", "body")
+            .body("body", body)
+            .build()
+            .expect("valid spec");
+        for raw in [APP_LINE.to_owned(), format!("{APP_LINE}\n")] {
+            let record = spec.parse(&raw).expect("valid record");
+            assert_eq!(
+                fields(&record),
+                [
+                    ("time", "2026-11-18T10:00:00Z"),
+                    ("app", "app"),
+                    ("message", r#"{"order_id":"A-1","amount":12.5}"#),
+                    ("order_id", "A-1"),
+                    ("amount", "12.5"),
+                ],
+                "{raw:?}"
+            );
+            assert!(matches!(
+                record.get_cow("order_id"),
+                Some(Cow::Borrowed("A-1"))
+            ));
+        }
+    }
+
+    #[test]
+    fn compose_nests_bodies_and_owns_values_read_from_unescaped_text() {
+        let items = spec(
+            Format::Delimited { delimiter: ';' },
+            &[("first_sku", "0"), ("second_sku", "1")],
+        );
+        let message = ParserSpec::builder(LOGFMT)
+            .field("order_id", "order_id")
+            .body("items", items)
+            .build()
+            .expect("valid spec");
+
+        let regex_header = ParserSpec::builder(regex(APP_HEADER))
+            .field("time", "time")
+            .body("body", message.clone())
+            .build()
+            .expect("valid spec");
+        let record = regex_header
+            .parse(r#"2026-11-18T10:00:00Z app[42]: order_id=A-1 items="B-7;C-3""#)
+            .expect("valid record");
+        let expected = [
+            ("time", "2026-11-18T10:00:00Z"),
+            ("order_id", "A-1"),
+            ("first_sku", "B-7"),
+            ("second_sku", "C-3"),
+        ];
+        assert_eq!(fields(&record), expected);
+        assert!(matches!(
+            record.get_cow("second_sku"),
+            Some(Cow::Borrowed("C-3"))
+        ));
+
+        let json_header = ParserSpec::builder(Format::Json)
+            .field("time", "/time")
+            .body("/message", message)
+            .build()
+            .expect("valid spec");
+        let record = json_header
+            .parse(
+                r#"{"time": "2026-11-18T10:00:00Z", "message": "order_id=A-1 items=\"B-7;C-3\""}"#,
+            )
+            .expect("valid record");
+        assert_eq!(fields(&record), expected);
+        assert!(matches!(
+            record.get_cow("time"),
+            Some(Cow::Borrowed("2026-11-18T10:00:00Z"))
+        ));
+        assert!(matches!(
+            record.get_cow("order_id"),
+            Some(Cow::Owned(order_id)) if order_id == "A-1"
+        ));
+        assert!(matches!(
+            record.get_cow("second_sku"),
+            Some(Cow::Owned(sku)) if sku == "C-3"
+        ));
+    }
+
+    #[test]
+    fn compose_reads_one_body_per_call() {
+        let spec = ParserSpec::builder(CSV)
+            .field("order_id", "0")
+            .body("1", spec(Format::Json, &[("amount", "/amount")]))
+            .body(
+                "2",
+                spec(Format::Delimited { delimiter: ';' }, &[("first_sku", "0")]),
+            )
+            .build()
+            .expect("valid spec");
+        let record = spec
+            .parse(r#"A-1,"{""amount"": 12.5}",B-7;C-3"#)
+            .expect("valid record");
+        assert_eq!(
+            fields(&record),
+            [
+                ("order_id", "A-1"),
+                ("amount", "12.5"),
+                ("first_sku", "B-7")
+            ]
+        );
+    }
+
+    #[test]
+    fn compose_body_without_text_leaves_body_fields_absent() {
+        let body = || {
+            spec(
+                Format::Json,
+                &[("order_id", "/order_id"), ("memo", "/memo")],
+            )
+        };
+        let strict = ParserSpec::builder(regex(APP_HEADER))
+            .field("pid", "pid")
+            .body("body", body())
+            .build()
+            .expect("valid spec");
+        let lenient = ParserSpec::builder(regex(APP_HEADER))
+            .field("pid", "pid")
+            .body("body", body())
+            .empty_as_none()
+            .build()
+            .expect("valid spec");
+
+        for spec in [&strict, &lenient] {
+            let record = spec
+                .parse("2026-11-18T10:00:00Z app[42]:")
+                .expect("valid record");
+            assert_eq!(fields(&record), [("pid", "42")]);
+        }
+
+        let empty_body = "2026-11-18T10:00:00Z app[42]: ";
+        assert!(strict.parse(empty_body).is_err());
+        let record = lenient.parse(empty_body).expect("valid record");
+        assert_eq!(fields(&record), [("pid", "42")]);
+
+        let record = lenient
+            .parse(r#"2026-11-18T10:00:00Z app[42]: {"order_id":"A-1","memo":""}"#)
+            .expect("valid record");
+        assert_eq!(
+            fields(&record),
+            [("pid", "42"), ("order_id", "A-1"), ("memo", "")]
+        );
+    }
+
+    #[test]
+    fn compose_malformed_when_header_or_body_does_not_match() {
+        let spec = ParserSpec::builder(regex(APP_HEADER))
+            .field("pid", "pid")
+            .body("body", spec(Format::Json, &[("order_id", "/order_id")]))
+            .build()
+            .expect("valid spec");
+        assert!(spec.parse(r#"app: {"order_id":"A-1"}"#).is_err());
+        for raw in [
+            r#"2026-11-18T10:00:00Z app[42]: {"order_id":"#,
+            "2026-11-18T10:00:00Z app[42]: order_id=A-1",
+        ] {
+            let err = spec.parse(raw).expect_err("malformed body");
+            assert!(err.reason().starts_with("body `body`: "), "{raw:?}");
+        }
+    }
+
+    #[test]
+    fn compose_rejects_names_repeated_across_header_and_bodies() {
+        let items = spec(Format::Delimited { delimiter: ';' }, &[("sku", "0")]);
+        let message = ParserSpec::builder(LOGFMT)
+            .field("order_id", "order_id")
+            .body("items", items)
+            .build()
+            .expect("valid spec");
+        for repeated in ["order_id", "sku"] {
+            let result = ParserSpec::builder(regex(APP_HEADER))
+                .field(repeated, "pid")
+                .body("body", message.clone())
+                .build();
+            assert_eq!(
+                result.map(|_| ()),
+                Err(SpecError::DuplicateField(repeated.into())),
+                "{repeated:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn compose_rejects_body_paths_invalid_for_the_header_format() {
+        let body = spec(Format::Json, &[("order_id", "/order_id")]);
+        for (format, path) in [
+            (regex(APP_HEADER), "payload"),
+            (Format::Json, "message"),
+            (CSV, "a"),
+            (LOGFMT, ""),
+        ] {
+            let result = ParserSpec::builder(format).body(path, body.clone()).build();
+            assert_eq!(
+                result.map(|_| ()),
+                Err(SpecError::InvalidPath(path.into())),
+                "{path:?}"
             );
         }
     }
