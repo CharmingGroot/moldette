@@ -1,4 +1,5 @@
-use crate::error::{LoadError, LoadErrorKind, ValueKind};
+use crate::arguments::Arguments;
+use crate::error::{LoadError, LoadErrorKind, Position, ValueKind};
 use crate::node::{Key, Node, NodeValue, Scalar, index_path, key_path};
 
 pub(crate) struct Cursor<'n> {
@@ -97,17 +98,16 @@ pub(crate) struct MapReader<'n> {
 }
 
 impl<'n> MapReader<'n> {
-    pub(crate) fn without(&self, keys: &[&str]) -> Node {
-        Node {
-            value: NodeValue::Map(
-                self.entries
-                    .iter()
-                    .filter(|(key, _)| !keys.contains(&key.text.as_str()))
-                    .cloned()
-                    .collect(),
-            ),
-            position: self.cursor.node.position,
-        }
+    pub(crate) fn arguments(&self, excluded: &[&str], position: Option<Position>) -> Arguments {
+        Arguments::new(
+            self.entries
+                .iter()
+                .filter(|(key, _)| !excluded.contains(&key.text.as_str()))
+                .cloned()
+                .collect(),
+            self.cursor.path.clone(),
+            position,
+        )
     }
 
     pub(crate) fn entries(&self) -> impl Iterator<Item = (&'n str, Cursor<'n>)> + '_ {

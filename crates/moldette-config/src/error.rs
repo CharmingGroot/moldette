@@ -1,5 +1,7 @@
 use std::fmt;
 
+use moldette_core::SpecError;
+
 /// An error found while reading a configuration, with the key path and, when
 /// the reader reports one, the position of the offending node.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,6 +73,23 @@ pub enum LoadErrorKind {
     TypeMismatch(ValueKind),
     IntegerOutOfRange(String),
     UnknownFieldType(String),
+    /// No entry of `schemas` has this name and version.
+    UnknownSchema {
+        name: String,
+        version: u32,
+    },
+    /// Another entry of `schemas` has the same name and version.
+    DuplicateSchema {
+        name: String,
+        version: u32,
+    },
+    /// The op is neither built in nor in the [`Registry`](crate::Registry).
+    UnknownOp(String),
+    /// The parser format is neither built in nor in the
+    /// [`Registry`](crate::Registry).
+    UnknownFormat(String),
+    /// A layer builder or a registered constructor rejected the spec.
+    Spec(SpecError),
 }
 
 impl fmt::Display for LoadErrorKind {
@@ -92,6 +111,18 @@ impl fmt::Display for LoadErrorKind {
             Self::TypeMismatch(expected) => write!(f, "expected {expected}"),
             Self::IntegerOutOfRange(text) => write!(f, "integer `{text}` is out of range"),
             Self::UnknownFieldType(name) => write!(f, "unknown field type `{name}`"),
+            Self::UnknownSchema { name, version } => {
+                write!(f, "schema `{name}` version {version} is not defined")
+            }
+            Self::DuplicateSchema { name, version } => {
+                write!(
+                    f,
+                    "schema `{name}` version {version} is defined more than once"
+                )
+            }
+            Self::UnknownOp(name) => write!(f, "unknown op `{name}`"),
+            Self::UnknownFormat(name) => write!(f, "unknown format `{name}`"),
+            Self::Spec(error) => write!(f, "{error}"),
         }
     }
 }
