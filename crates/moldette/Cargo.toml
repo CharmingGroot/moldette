@@ -1,0 +1,28 @@
+[package]
+name = "moldette"
+version = "0.0.0"
+description = "Turns one raw record into one record of a declared output schema"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+# Kept unpublished until the first public release (#10).
+publish = false
+
+[dependencies]
+moldette-config = { path = "../moldette-config", optional = true }
+moldette-core = { path = "../moldette-core" }
+moldette-mapper = { path = "../moldette-mapper", optional = true }
+moldette-parser = { path = "../moldette-parser", optional = true }
+moldette-resp = { path = "../moldette-resp", optional = true }
+
+[dev-dependencies]
+moldette-test-tracing = { path = "../moldette-test-tracing" }
+tracing = { workspace = true }
+
+[features]
+default = ["config"]
+parser = ["dep:moldette-parser"]
+mapper = ["dep:moldette-mapper"]
+resp = ["dep:moldette-resp"]
+config = ["dep:moldette-config", "parser", "mapper", "resp"]
+tracing = ["moldette-parser?/tracing", "moldette-mapper?/tracing", "moldette-resp?/tracing"]
