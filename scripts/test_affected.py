@@ -4,9 +4,11 @@ from affected import Workspace, lock_changes, plan, runs_deny, shared_module_war
 
 CORE, PARSER, MAPPER, RESP = "moldette-core", "moldette-parser", "moldette-mapper", "moldette-resp"
 CONFIG, FACADE, TEST_TRACING = "moldette-config", "moldette", "moldette-test-tracing"
+EXAMPLE = "moldette-otlp-example"
 
 WORKSPACE = Workspace(
-    dirs={name: f"crates/{name}" for name in (CORE, PARSER, MAPPER, RESP, CONFIG, FACADE, TEST_TRACING)},
+    dirs={**{name: f"crates/{name}" for name in (CORE, PARSER, MAPPER, RESP, CONFIG, FACADE, TEST_TRACING)},
+          EXAMPLE: "examples/otlp"},
     dependencies={
         CORE: {},
         PARSER: {CORE: True, TEST_TRACING: False},
@@ -16,6 +18,7 @@ WORKSPACE = Workspace(
         FACADE: {CORE: True, PARSER: True, MAPPER: True, RESP: True, CONFIG: True,
                  TEST_TRACING: False},
         TEST_TRACING: {},
+        EXAMPLE: {FACADE: True},
     },
 )
 
@@ -40,11 +43,13 @@ GRAPHS = {
 }
 
 E2E_MODULES = {"delimited", "json", "kv", "regex"}
-ALL_FULL = [{"crate": name, "scope": "full", "tests": []} for name in sorted(WORKSPACE.dirs)]
 
 
 def entry(crate, scope, *tests):
-    return {"crate": crate, "scope": scope, "tests": list(tests)}
+    return {"crate": crate, "scope": scope, "tests": list(tests), "wasm": crate != EXAMPLE}
+
+
+ALL_FULL = [entry(name, "full") for name in sorted(WORKSPACE.dirs)]
 
 
 def scoped(*files, lock_changed=frozenset()):
@@ -71,6 +76,7 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(scoped("crates/moldette-parser/src/kv.rs"), [
             entry(FACADE, "edge", "--test e2e -- kv::"),
             entry(CONFIG, "edge", "--test lowering -- lower::parser::kv:: lower::parser::spec::"),
+            entry(EXAMPLE, "check"),
             entry(PARSER, "full"),
         ])
 
@@ -83,17 +89,20 @@ class PlanTest(unittest.TestCase):
             entry(CONFIG, "edge", "--test lowering -- lower::mapper::op:: lower::mapper::recorder:: "
                                   "lower::mapper::rule:: lower::mapper::spec::"),
             entry(MAPPER, "full"),
+            entry(EXAMPLE, "check"),
         ])
 
     def test_config_lineage_runs_config_in_full_and_whole_e2e(self):
         self.assertEqual(scoped("crates/moldette-config/src/lineage.rs"), [
             entry(FACADE, "edge", "--test e2e"),
             entry(CONFIG, "full"),
+            entry(EXAMPLE, "check"),
         ])
 
-    def test_core_runs_every_crate_that_uses_it_in_full(self):
+    def test_core_runs_every_library_crate_that_uses_it_in_full(self):
         self.assertEqual(scoped("crates/moldette-core/src/value.rs"),
-                         [e for e in ALL_FULL if e["crate"] != TEST_TRACING])
+                         [entry(EXAMPLE, "check") if e["crate"] == EXAMPLE else e
+                          for e in ALL_FULL if e["crate"] != TEST_TRACING])
 
     def test_test_tracing_runs_tracing_tests_of_dev_dependents_only(self):
         tracing = "--test tracing --features tracing"
@@ -119,6 +128,7 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(scoped("crates/moldette-parser/src/text.rs"), [
             entry(FACADE, "edge", "--test e2e"),
             entry(CONFIG, "edge", "--test lowering -- lower::parser::"),
+            entry(EXAMPLE, "check"),
             entry(PARSER, "full"),
         ])
 
@@ -130,6 +140,17 @@ class PlanTest(unittest.TestCase):
     def test_workspace_and_ci_files_run_every_crate_in_full(self):
         for path in ("Cargo.toml", "deny.toml", ".github/workflows/ci.yml", "scripts/affected.py"):
             self.assertEqual(scoped(path), ALL_FULL, path)
+
+    def test_facade_change_compiles_example_for_the_host(self):
+        self.assertEqual(scoped("crates/moldette/src/pipeline.rs"), [
+            entry(FACADE, "full"),
+            entry(EXAMPLE, "check"),
+        ])
+
+    def test_example_change_runs_only_the_example_in_full_for_the_host(self):
+        self.assertEqual(scoped("examples/otlp/src/main.rs"), [entry(EXAMPLE, "full")])
+        self.assertEqual(scoped("Cargo.lock", lock_changed={EXAMPLE}), [entry(EXAMPLE, "full")])
+        self.assertTrue(runs_deny(["examples/otlp/Cargo.toml"]))
 
     def test_coupling_tests_of_several_changes_are_merged(self):
         self.assertEqual(scoped("crates/moldette-parser/src/kv.rs", "crates/moldette-parser/src/json.rs",
