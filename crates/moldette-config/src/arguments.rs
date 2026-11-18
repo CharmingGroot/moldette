@@ -60,6 +60,17 @@ impl Arguments {
         self.read(key)?.bool()
     }
 
+    /// Reads `key` as a sequence and returns its items in declared order.
+    pub fn list(&mut self, key: &str) -> Result<Vec<Argument<'_>>, LoadError> {
+        Argument(self.read(key)?).list()
+    }
+
+    /// Reads `key` as a map and returns its entries in declared order. Every
+    /// entry counts as read.
+    pub fn map(&mut self, key: &str) -> Result<Vec<(&str, Argument<'_>)>, LoadError> {
+        Argument(self.read(key)?).map()
+    }
+
     /// Reports `error`, found by the constructor in the value of `key`, at
     /// the key path and position of that value.
     pub fn spec_error(&self, key: &str, error: SpecError) -> LoadError {
@@ -114,5 +125,56 @@ impl Arguments {
             })?;
         *read = true;
         Ok(Cursor::new(node, key_path(&self.path, key)))
+    }
+}
+
+/// One item of a list argument or one value of a map argument, read with the
+/// same checks as a key of [`Arguments`].
+#[derive(Debug)]
+pub struct Argument<'a>(Cursor<'a>);
+
+impl<'a> Argument<'a> {
+    pub fn string(&self) -> Result<String, LoadError> {
+        self.0.string()
+    }
+
+    pub fn character(&self) -> Result<char, LoadError> {
+        self.0.character()
+    }
+
+    pub fn integer<T: TryFrom<u64>>(&self) -> Result<T, LoadError> {
+        self.0.integer()
+    }
+
+    pub fn bool(&self) -> Result<bool, LoadError> {
+        self.0.bool()
+    }
+
+    pub fn list(&self) -> Result<Vec<Argument<'a>>, LoadError> {
+        Ok(self
+            .cursor()
+            .sequence()?
+            .into_iter()
+            .map(Argument)
+            .collect())
+    }
+
+    pub fn map(&self) -> Result<Vec<(&'a str, Argument<'a>)>, LoadError> {
+        Ok(self
+            .cursor()
+            .map()?
+            .entries()
+            .map(|(key, cursor)| (key, Argument(cursor)))
+            .collect())
+    }
+
+    /// Reports `error`, found by the constructor in this value, at its key
+    /// path and position.
+    pub fn spec_error(&self, error: SpecError) -> LoadError {
+        self.0.error(LoadErrorKind::Spec(error))
+    }
+
+    fn cursor(&self) -> Cursor<'a> {
+        Cursor::new(self.0.node, self.0.path.clone())
     }
 }

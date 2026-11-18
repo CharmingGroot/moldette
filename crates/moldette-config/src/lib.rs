@@ -20,7 +20,7 @@ mod node;
 mod registry;
 mod yaml;
 
-pub use arguments::Arguments;
+pub use arguments::{Argument, Arguments};
 pub use error::{LoadError, LoadErrorKind, Position, ValueKind};
 pub use lower::Specs;
 pub use model::{
@@ -40,6 +40,7 @@ mod tests {
         assert_send_sync::<Config>();
         assert_send_sync::<LoadError>();
         assert_send_sync::<Arguments>();
+        assert_send_sync::<Argument<'static>>();
         assert_send_sync::<Registry>();
         assert_send_sync::<RegistryError>();
         assert_send_sync::<Specs>();

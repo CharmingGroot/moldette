@@ -479,7 +479,31 @@ impl Op for Upper {
 }
 
 #[derive(Debug)]
+struct Replace(Vec<(String, String)>);
+
+impl Op for Replace {
+    fn apply<'a>(&'a self, text: &'a str) -> Option<Cow<'a, str>> {
+        let replaced = self.0.iter().find(|(from, _)| from == text);
+        Some(Cow::Borrowed(replaced.map_or(text, |(_, to)| to.as_str())))
+    }
+
+    fn name(&self) -> &str {
+        "replace"
+    }
+}
+
+fn replace(arguments: &mut Arguments) -> Result<Arc<dyn Op>, LoadError> {
+    let pairs = arguments
+        .map("pairs")?
+        .into_iter()
+        .map(|(from, to)| Ok((from.to_owned(), to.string()?)))
+        .collect::<Result<_, LoadError>>()?;
+    Ok(Arc::new(Replace(pairs)))
+}
+
+#[derive(Debug)]
 struct FixedWidth {
+    columns: Vec<Range<usize>>,
     padding: char,
 }
 
@@ -491,9 +515,7 @@ impl Parser for FixedWidth {
     }
 
     fn path(&self, path: &str) -> Option<Range<usize>> {
-        let (start, end) = path.split_once("..")?;
-        let range = start.parse().ok()?..end.parse().ok()?;
-        (range.start < range.end).then_some(range)
+        self.columns.get(path.parse::<usize>().ok()?).cloned()
     }
 
     fn read<'a>(
@@ -518,12 +540,23 @@ fn fixed_width(arguments: &mut Arguments) -> Result<Format, LoadError> {
     } else {
         ' '
     };
-    Ok(Format::custom(FixedWidth { padding }))
+    let mut columns = Vec::new();
+    let mut start = 0;
+    for width in arguments.list("widths")? {
+        let size: usize = width.integer()?;
+        if size == 0 {
+            return Err(width.spec_error(invalid_argument("fixed_width.widths", "0")));
+        }
+        columns.push(start..start + size);
+        start += size;
+    }
+    Ok(Format::custom(FixedWidth { columns, padding }))
 }
 
 fn registry() -> Registry {
     Registry::new()
         .op("pad", pad)
+        .and_then(|registry| registry.op("replace", replace))
         .and_then(|registry| {
             registry.op("upper", |_: &mut Arguments| {
                 Ok(Arc::new(Upper) as Arc<dyn Op>)
@@ -544,7 +577,8 @@ schemas:
 parser:
   format: fixed_width
   padding: "."
-  fields: {order_id: "0..6", status: "6..14", amount: "14..22"}
+  widths: [6, 8, 8]
+  fields: {order_id: "0", status: "1", amount: "2"}
 mapper:
   schema: {name: order, version: 1}
   rules:
@@ -555,6 +589,7 @@ mapper:
     - target: status
       from: status
       via:
+        - replace: {pairs: {paid: settled, open: pending}}
         - upper
 resp:
   schema: {name: order, version: 1}
@@ -567,7 +602,7 @@ fn builds_caller_defined_ops_and_formats() {
         panic!("record is ok");
     };
     assert_eq!(mapped.get("order_id"), Some(&text("00000A-1")));
-    assert_eq!(mapped.get("status"), Some(&text("PAID")));
+    assert_eq!(mapped.get("status"), Some(&text("SETTLED")));
     assert_eq!(mapped.get("amount"), Some(&Value::Float(12.5)));
 }
 
@@ -579,25 +614,55 @@ fn reads_caller_defined_arguments_with_key_path_and_position() {
             FIXED_ORDERS.replace("width: 8", "widht: 8"),
             LoadErrorKind::MissingKey("width".into()),
             "mapper.rules[0].via[0].pad",
-            Some((19, 16)),
+            Some((20, 16)),
         ),
         (
             FIXED_ORDERS.replace("width: 8", "width: wide"),
             LoadErrorKind::TypeMismatch(ValueKind::Integer),
             "mapper.rules[0].via[0].pad.width",
-            Some((19, 24)),
+            Some((20, 24)),
         ),
         (
             FIXED_ORDERS.replace("width: 8", "width: 0"),
             spec(invalid_argument("pad.width", "0")),
             "mapper.rules[0].via[0].pad.width",
-            Some((19, 24)),
+            Some((20, 24)),
         ),
         (
             FIXED_ORDERS.replace("fill: \"0\"", "fill: \"00\""),
             LoadErrorKind::TypeMismatch(ValueKind::Character),
             "mapper.rules[0].via[0].pad.fill",
-            Some((19, 33)),
+            Some((20, 33)),
+        ),
+        (
+            FIXED_ORDERS.replace("[6, 8, 8]", "[6, eight, 8]"),
+            LoadErrorKind::TypeMismatch(ValueKind::Integer),
+            "parser.widths[1]",
+            Some((12, 15)),
+        ),
+        (
+            FIXED_ORDERS.replace("[6, 8, 8]", "[6, 0, 8]"),
+            spec(invalid_argument("fixed_width.widths", "0")),
+            "parser.widths[1]",
+            Some((12, 15)),
+        ),
+        (
+            FIXED_ORDERS.replace("[6, 8, 8]", "6"),
+            LoadErrorKind::TypeMismatch(ValueKind::Sequence),
+            "parser.widths",
+            Some((12, 11)),
+        ),
+        (
+            FIXED_ORDERS.replace("paid: settled", "paid: [settled]"),
+            LoadErrorKind::TypeMismatch(ValueKind::String),
+            "mapper.rules[1].via[0].replace.pairs.paid",
+            Some((24, 35)),
+        ),
+        (
+            FIXED_ORDERS.replace("{pairs: {paid: settled, open: pending}}", "{pairs: [paid]}"),
+            LoadErrorKind::TypeMismatch(ValueKind::Map),
+            "mapper.rules[1].via[0].replace.pairs",
+            Some((24, 28)),
         ),
     ];
     for (text, kind, path, position) in cases {
@@ -618,7 +683,7 @@ fn rejects_arguments_the_constructor_does_not_read() {
         (
             &LoadErrorKind::UnknownKey("fil".into()),
             "mapper.rules[0].via[0].pad",
-            Some((19, 27))
+            Some((20, 27))
         )
     );
 
@@ -632,6 +697,16 @@ fn rejects_arguments_the_constructor_does_not_read() {
         )
     );
 
+    let err = build_error(&FIXED_ORDERS.replace("  widths:", "  width:"), &registry);
+    assert_eq!(
+        location(&err),
+        (
+            &LoadErrorKind::MissingKey("widths".into()),
+            "parser",
+            Some((10, 11))
+        )
+    );
+
     let err = build_error(
         &FIXED_ORDERS.replace("- upper", "- upper: {case: title}"),
         &registry,
@@ -640,8 +715,8 @@ fn rejects_arguments_the_constructor_does_not_read() {
         location(&err),
         (
             &LoadErrorKind::UnknownKey("case".into()),
-            "mapper.rules[1].via[0].upper",
-            Some((23, 19))
+            "mapper.rules[1].via[1].upper",
+            Some((25, 19))
         )
     );
 }
@@ -663,8 +738,8 @@ fn rejects_names_missing_from_the_registry() {
         location(&err),
         (
             &LoadErrorKind::UnknownOp("uper".into()),
-            "mapper.rules[1].via[0].uper",
-            Some((23, 11))
+            "mapper.rules[1].via[1].uper",
+            Some((25, 11))
         )
     );
 }

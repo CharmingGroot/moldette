@@ -161,6 +161,32 @@ pub struct RespSection {
 
 const PARSER_KEYS: [&str; 4] = ["format", "fields", "bodies", "empty_as_none"];
 
+pub(crate) const BUILT_IN_FORMATS: [(&str, &[&str]); 4] = [
+    ("json", &[]),
+    ("delimited", &["delimiter"]),
+    ("regex", &["pattern"]),
+    ("kv", &["pair_delimiter", "key_value_delimiter"]),
+];
+
+pub(crate) const BUILT_IN_OPS: [(&str, &[&str]); 6] = [
+    ("trim", &[]),
+    ("split", &["separator", "index"]),
+    ("extract", &["pattern"]),
+    ("lookup", &["table"]),
+    ("timestamp", &["formats"]),
+    ("empty_as_none", &[]),
+];
+
+pub(crate) fn built_in_keys(
+    built_in: &[(&'static str, &'static [&'static str])],
+    name: &str,
+) -> Option<&'static [&'static str]> {
+    built_in
+        .iter()
+        .find(|(built_in_name, _)| *built_in_name == name)
+        .map(|(_, keys)| *keys)
+}
+
 impl Config {
     pub fn from_yaml(text: &str) -> Result<Self, LoadError> {
         Self::decode(&yaml::read(text)?)
@@ -230,21 +256,15 @@ fn field_type(cursor: &Cursor<'_>) -> Result<Type, LoadError> {
 fn parser(map: &MapReader<'_>, extra_keys: &[&str]) -> Result<ParserSection, LoadError> {
     let format = map.require("format")?;
     let name = format.string()?;
-    let format_keys: &[&str] = match name.as_str() {
-        "json" => &[],
-        "delimited" => &["delimiter"],
-        "regex" => &["pattern"],
-        "kv" => &["pair_delimiter", "key_value_delimiter"],
-        _ => {
-            let format = FormatEntry::Custom {
-                arguments: map.arguments(
-                    &[&PARSER_KEYS[..], extra_keys].concat(),
-                    format.node.position,
-                ),
-                name,
-            };
-            return parser_section(map, format);
-        }
+    let Some(format_keys) = built_in_keys(&BUILT_IN_FORMATS, &name) else {
+        let format = FormatEntry::Custom {
+            arguments: map.arguments(
+                &[&PARSER_KEYS[..], extra_keys].concat(),
+                format.node.position,
+            ),
+            name,
+        };
+        return parser_section(map, format);
     };
     map.allow(&[&PARSER_KEYS[..], extra_keys, format_keys].concat())?;
     let format = match name.as_str() {
@@ -369,18 +389,11 @@ fn op(cursor: Cursor<'_>) -> Result<OpEntry, LoadError> {
 fn op_with_arguments(name: &str, cursor: Cursor<'_>) -> Result<OpEntry, LoadError> {
     let position = cursor.node.position;
     let map = cursor.map()?;
-    let keys: &[&str] = match name {
-        "split" => &["separator", "index"],
-        "extract" => &["pattern"],
-        "lookup" => &["table"],
-        "timestamp" => &["formats"],
-        "trim" | "empty_as_none" => &[],
-        _ => {
-            return Ok(OpEntry::Custom {
-                name: name.to_owned(),
-                arguments: map.arguments(&[], position),
-            });
-        }
+    let Some(keys) = built_in_keys(&BUILT_IN_OPS, name) else {
+        return Ok(OpEntry::Custom {
+            name: name.to_owned(),
+            arguments: map.arguments(&[], position),
+        });
     };
     map.allow(keys)?;
     Ok(match name {

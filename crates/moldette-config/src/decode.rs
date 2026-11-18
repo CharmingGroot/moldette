@@ -2,6 +2,7 @@ use crate::arguments::Arguments;
 use crate::error::{LoadError, LoadErrorKind, Position, ValueKind};
 use crate::node::{Key, Node, NodeValue, Scalar, index_path, key_path};
 
+#[derive(Debug)]
 pub(crate) struct Cursor<'n> {
     pub(crate) node: &'n Node,
     pub(crate) path: String,

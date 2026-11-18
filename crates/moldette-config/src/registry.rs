@@ -7,19 +7,10 @@ use moldette_parser::Format;
 
 use crate::arguments::Arguments;
 use crate::error::{LoadError, LoadErrorKind};
+use crate::model::{BUILT_IN_FORMATS, BUILT_IN_OPS, built_in_keys};
 
 type OpConstructor = dyn Fn(&mut Arguments) -> Result<Arc<dyn Op>, LoadError> + Send + Sync;
 type FormatConstructor = dyn Fn(&mut Arguments) -> Result<Format, LoadError> + Send + Sync;
-
-const BUILT_IN_OPS: [&str; 6] = [
-    "trim",
-    "split",
-    "extract",
-    "lookup",
-    "timestamp",
-    "empty_as_none",
-];
-const BUILT_IN_FORMATS: [&str; 4] = ["json", "delimited", "regex", "kv"];
 
 /// Constructors of the caller-defined ops and formats a configuration names.
 /// It is passed to [`Config::build`](crate::Config::build); nothing is
@@ -104,11 +95,11 @@ impl fmt::Debug for Registry {
 
 fn insert<C: ?Sized>(
     table: &mut BTreeMap<String, Box<C>>,
-    built_in: &[&str],
+    built_in: &[(&'static str, &'static [&'static str])],
     name: String,
     constructor: Box<C>,
 ) -> Result<(), RegistryError> {
-    if built_in.contains(&name.as_str()) {
+    if built_in_keys(built_in, &name).is_some() {
         return Err(RegistryError::BuiltInName(name));
     }
     if table.contains_key(&name) {
