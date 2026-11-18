@@ -64,6 +64,9 @@ name = "moldette-config"
 version = "0.0.0"
 dependencies = [
  "moldette-core",
+ "moldette-mapper",
+ "moldette-parser",
+ "moldette-resp",
  "serde",
  "serde_json",
  "yaml-rust2",

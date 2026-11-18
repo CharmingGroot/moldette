@@ -1,7 +1,8 @@
 use moldette_core::Type;
 
+use crate::arguments::Arguments;
 use crate::decode::{Cursor, MapReader};
-use crate::error::{LoadError, LoadErrorKind, ValueKind};
+use crate::error::{LoadError, LoadErrorKind, Position, ValueKind};
 use crate::node::{Node, NodeValue, Scalar, key_path, reject_duplicate_keys};
 use crate::{json, yaml};
 
@@ -16,12 +17,19 @@ pub struct Config {
     pub resp: Option<RespSection>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Eq)]
 #[non_exhaustive]
 pub struct SchemaEntry {
     pub name: String,
     pub version: u32,
     pub fields: Vec<FieldEntry>,
+    pub(crate) position: Option<Position>,
+}
+
+impl PartialEq for SchemaEntry {
+    fn eq(&self, other: &Self) -> bool {
+        (&self.name, self.version, &self.fields) == (&other.name, other.version, &other.fields)
+    }
 }
 
 /// One output field, written with the key `type` for `ty`.
@@ -85,11 +93,18 @@ pub struct MapperSection {
 }
 
 /// A reference to an entry of `schemas`. The version is always given (#14).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Eq)]
 #[non_exhaustive]
 pub struct SchemaRef {
     pub name: String,
     pub version: u32,
+    pub(crate) position: Option<Position>,
+}
+
+impl PartialEq for SchemaRef {
+    fn eq(&self, other: &Self) -> bool {
+        (&self.name, self.version) == (&other.name, other.version)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -144,18 +159,33 @@ pub struct RespSection {
     pub strict: bool,
 }
 
-/// The argument map of a caller-defined op or parser, read when the name is
-/// resolved.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Arguments(Node);
-
-impl Arguments {
-    pub fn is_empty(&self) -> bool {
-        matches!(&self.0.value, NodeValue::Map(entries) if entries.is_empty())
-    }
-}
-
 const PARSER_KEYS: [&str; 4] = ["format", "fields", "bodies", "empty_as_none"];
+
+pub(crate) const BUILT_IN_FORMATS: [(&str, &[&str]); 4] = [
+    ("json", &[]),
+    ("delimited", &["delimiter"]),
+    ("regex", &["pattern"]),
+    ("kv", &["pair_delimiter", "key_value_delimiter"]),
+];
+
+pub(crate) const BUILT_IN_OPS: [(&str, &[&str]); 6] = [
+    ("trim", &[]),
+    ("split", &["separator", "index"]),
+    ("extract", &["pattern"]),
+    ("lookup", &["table"]),
+    ("timestamp", &["formats"]),
+    ("empty_as_none", &[]),
+];
+
+pub(crate) fn built_in_keys(
+    built_in: &[(&'static str, &'static [&'static str])],
+    name: &str,
+) -> Option<&'static [&'static str]> {
+    built_in
+        .iter()
+        .find(|(built_in_name, _)| *built_in_name == name)
+        .map(|(_, keys)| *keys)
+}
 
 impl Config {
     pub fn from_yaml(text: &str) -> Result<Self, LoadError> {
@@ -187,12 +217,14 @@ impl Config {
 }
 
 fn schema(cursor: Cursor<'_>) -> Result<SchemaEntry, LoadError> {
+    let position = cursor.node.position;
     let map = cursor.map()?;
     map.allow(&["name", "version", "fields"])?;
     Ok(SchemaEntry {
         name: map.require("name")?.string()?,
         version: map.require("version")?.integer()?,
         fields: map.require("fields")?.list(field)?,
+        position,
     })
 }
 
@@ -222,19 +254,17 @@ fn field_type(cursor: &Cursor<'_>) -> Result<Type, LoadError> {
 }
 
 fn parser(map: &MapReader<'_>, extra_keys: &[&str]) -> Result<ParserSection, LoadError> {
-    let name = map.require("format")?.string()?;
-    let format_keys: &[&str] = match name.as_str() {
-        "json" => &[],
-        "delimited" => &["delimiter"],
-        "regex" => &["pattern"],
-        "kv" => &["pair_delimiter", "key_value_delimiter"],
-        _ => {
-            let format = FormatEntry::Custom {
-                arguments: Arguments(map.without(&[&PARSER_KEYS[..], extra_keys].concat())),
-                name,
-            };
-            return parser_section(map, format);
-        }
+    let format = map.require("format")?;
+    let name = format.string()?;
+    let Some(format_keys) = built_in_keys(&BUILT_IN_FORMATS, &name) else {
+        let format = FormatEntry::Custom {
+            arguments: map.arguments(
+                &[&PARSER_KEYS[..], extra_keys].concat(),
+                format.node.position,
+            ),
+            name,
+        };
+        return parser_section(map, format);
     };
     map.allow(&[&PARSER_KEYS[..], extra_keys, format_keys].concat())?;
     let format = match name.as_str() {
@@ -302,11 +332,13 @@ fn resp(cursor: Cursor<'_>) -> Result<RespSection, LoadError> {
 }
 
 fn schema_ref(cursor: Cursor<'_>) -> Result<SchemaRef, LoadError> {
+    let position = cursor.node.position;
     let map = cursor.map()?;
     map.allow(&["name", "version"])?;
     Ok(SchemaRef {
         name: map.require("name")?.string()?,
         version: map.require("version")?.integer()?,
+        position,
     })
 }
 
@@ -355,20 +387,13 @@ fn op(cursor: Cursor<'_>) -> Result<OpEntry, LoadError> {
 }
 
 fn op_with_arguments(name: &str, cursor: Cursor<'_>) -> Result<OpEntry, LoadError> {
-    let node = cursor.node;
+    let position = cursor.node.position;
     let map = cursor.map()?;
-    let keys: &[&str] = match name {
-        "split" => &["separator", "index"],
-        "extract" => &["pattern"],
-        "lookup" => &["table"],
-        "timestamp" => &["formats"],
-        "trim" | "empty_as_none" => &[],
-        _ => {
-            return Ok(OpEntry::Custom {
-                name: name.to_owned(),
-                arguments: Arguments(node.clone()),
-            });
-        }
+    let Some(keys) = built_in_keys(&BUILT_IN_OPS, name) else {
+        return Ok(OpEntry::Custom {
+            name: name.to_owned(),
+            arguments: map.arguments(&[], position),
+        });
     };
     map.allow(keys)?;
     Ok(match name {
