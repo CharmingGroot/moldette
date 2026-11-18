@@ -6,7 +6,7 @@
 
 mod spec;
 
-pub use spec::RespSpec;
+pub use spec::{RespSpec, RespSpecBuilder};
 
 #[cfg(test)]
 mod tests {
