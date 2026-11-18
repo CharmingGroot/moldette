@@ -66,7 +66,7 @@ moldette            pipeline facade, layers selected by feature
 | Layer | Components |
 |---|---|
 | parser | `json`, `delimited`, `regex`, `kv`, header + body composition |
-| mapper | rule keys `target`, `from`, `via`, `fallback`, `required` (#14); ops `trim`, `split`/`at`, `extract`, `lookup`, `const`, `coalesce`, `timestamp`; implicit coercion to string, int, float, bool, timestamp, ip |
+| mapper | rule keys `target`, `from`, `via`, `fallback` (#14); ops `trim`, `split`/`at`, `extract`, `lookup`, `const`, `coalesce`, `timestamp`; implicit coercion to string, int, float, bool, timestamp, ip |
 | resp | statuses `Ok`, `Malformed`, `MissingRequired`, `Emptied` (strict mode, #5); `explain` (#6); strict mode |
 
 Custom parsers and ops are registered as Rust types. Configuration has no
@@ -110,7 +110,7 @@ use core types only.
 ### M2 mapper
 
 1. standalone API, rule builder
-2. rule execution: `from`, `fallback`, `required`
+2. rule execution: `from`, `fallback`
 3. implicit coercion
 4. `via` chains
 5. built-in ops
