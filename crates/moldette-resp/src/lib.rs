@@ -5,7 +5,8 @@
 //! any tool (#3).
 //!
 //! With the `tracing` feature, each batch runs in an `INFO` span
-//! `moldette.resp.respond_batch` that carries the response count per status.
+//! `moldette.resp.respond_batch` that carries whether strict mode is on and the
+//! response count per status.
 //! Its duration includes reading the input records. Signals never carry record
 //! values (#7).
 
