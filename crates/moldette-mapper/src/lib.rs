@@ -8,6 +8,7 @@
 
 mod coerce;
 mod op;
+mod recorder;
 mod rule;
 mod spec;
 
