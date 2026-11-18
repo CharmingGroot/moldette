@@ -38,6 +38,7 @@ name = "moldette-mapper"
 version = "0.0.0"
 dependencies = [
  "moldette-core",
+ "moldette-test-tracing",
  "regex",
  "time",
  "tracing",
@@ -48,9 +49,11 @@ name = "moldette-parser"
 version = "0.0.0"
 dependencies = [
  "moldette-core",
+ "moldette-test-tracing",
  "regex",
  "serde",
  "serde_json",
+ "tracing",
 ]
 
 [[package]]
@@ -58,6 +61,14 @@ name = "moldette-resp"
 version = "0.0.0"
 dependencies = [
  "moldette-core",
+ "moldette-test-tracing",
+ "tracing",
+]
+
+[[package]]
+name = "moldette-test-tracing"
+version = "0.0.0"
+dependencies = [
  "tracing",
 ]
 

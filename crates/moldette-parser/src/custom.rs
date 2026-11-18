@@ -47,6 +47,10 @@ impl CustomFormat {
     pub(crate) fn resolve(&self, paths: &[String]) -> Result<CustomPaths, SpecError> {
         Arc::clone(&self.0).resolve(paths)
     }
+
+    pub(crate) fn name(&self) -> &str {
+        self.0.format_name()
+    }
 }
 
 impl PartialEq for CustomFormat {
@@ -59,6 +63,8 @@ impl Eq for CustomFormat {}
 
 trait ResolvePaths: fmt::Debug + Send + Sync + RefUnwindSafe {
     fn resolve(self: Arc<Self>, paths: &[String]) -> Result<CustomPaths, SpecError>;
+
+    fn format_name(&self) -> &str;
 }
 
 impl<P: Parser + 'static> ResolvePaths for P {
@@ -74,6 +80,10 @@ impl<P: Parser + 'static> ResolvePaths for P {
             parser: self,
             paths,
         })))
+    }
+
+    fn format_name(&self) -> &str {
+        self.name()
     }
 }
 
