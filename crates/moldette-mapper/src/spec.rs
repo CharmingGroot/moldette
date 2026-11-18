@@ -378,19 +378,45 @@ mod tests {
     }
 
     #[test]
-    fn rejects_op_arguments_that_do_not_compile() {
+    fn rejects_invalid_or_empty_op_arguments() {
+        let empty: [&str; 0] = [];
         let cases = [
-            (Rule::new("order_id", "raw").extract("(A-"), "(A-"),
-            (Rule::new("order_id", "raw").extract("A-1"), "A-1"),
-            (Rule::new("order_id", "raw").extract("(A)-(1)"), "(A)-(1)"),
+            (
+                Rule::new("order_id", "raw").extract("(A-"),
+                "extract.pattern",
+                "(A-",
+            ),
+            (
+                Rule::new("order_id", "raw").extract("A-1"),
+                "extract.pattern",
+                "A-1",
+            ),
+            (
+                Rule::new("order_id", "raw").extract("(A)-(1)"),
+                "extract.pattern",
+                "(A)-(1)",
+            ),
             (
                 Rule::new("ordered_at", "at").timestamp([LOCAL_TIME, "[year"]),
+                "timestamp.formats",
                 "[year",
             ),
+            (
+                Rule::new("ordered_at", "at").timestamp(empty),
+                "timestamp.formats",
+                "",
+            ),
+            (Rule::coalesce("quantity", empty), "coalesce.from", ""),
         ];
-        for (rule, argument) in cases {
+        for (rule, name, value) in cases {
             let result = MapperSpec::builder(order_schema()).rule(rule).build();
-            assert_eq!(result, Err(SpecError::InvalidPath(argument.into())));
+            assert_eq!(
+                result,
+                Err(SpecError::InvalidArgument {
+                    name: name.into(),
+                    value: value.into(),
+                })
+            );
         }
     }
 

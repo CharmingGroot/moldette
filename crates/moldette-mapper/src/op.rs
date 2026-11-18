@@ -41,7 +41,7 @@ impl DeclaredOp {
                 Regex::new(pattern)
                     .ok()
                     .filter(|regex| regex.captures_len() == 2)
-                    .ok_or_else(|| SpecError::InvalidPath(pattern.clone()))?,
+                    .ok_or_else(|| invalid_argument("extract.pattern", pattern))?,
             ),
             Self::Lookup(table) => {
                 let mut compiled = BTreeMap::new();
@@ -50,17 +50,27 @@ impl DeclaredOp {
                 }
                 CompiledOp::Lookup(compiled)
             }
+            Self::Timestamp(formats) if formats.is_empty() => {
+                return Err(invalid_argument("timestamp.formats", ""));
+            }
             Self::Timestamp(formats) => CompiledOp::Timestamp(
                 formats
                     .iter()
                     .map(|format| {
                         format_description::parse_owned::<2>(format)
-                            .map_err(|_| SpecError::InvalidPath(format.clone()))
+                            .map_err(|_| invalid_argument("timestamp.formats", format))
                     })
                     .collect::<Result<_, _>>()?,
             ),
             Self::EmptyAsNone => CompiledOp::EmptyAsNone,
         })
+    }
+}
+
+pub(crate) fn invalid_argument(name: &str, value: &str) -> SpecError {
+    SpecError::InvalidArgument {
+        name: name.to_owned(),
+        value: value.to_owned(),
     }
 }
 

@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use moldette_core::{FieldRecord, SpecError};
 
-use crate::op::{CompiledOp, DeclaredOp};
+use crate::op::{CompiledOp, DeclaredOp, invalid_argument};
 
 /// Where one output field takes its value from, and the ops applied to it.
 ///
@@ -31,7 +31,7 @@ impl Rule {
     }
 
     /// Reads the first of the source fields `from` that is present in the
-    /// record.
+    /// record. The build fails when `from` is empty.
     pub fn coalesce(
         target: impl Into<String>,
         from: impl IntoIterator<Item = impl Into<String>>,
@@ -97,7 +97,7 @@ impl Rule {
     /// Reads the text with the first of `formats` that matches it and writes
     /// it as RFC 3339. Formats use the version 2 format description syntax of
     /// the `time` crate; a format without an offset reads the text as UTC. The
-    /// build fails when a format is not valid.
+    /// build fails when `formats` is empty or a format is not valid.
     pub fn timestamp(self, formats: impl IntoIterator<Item = impl Into<String>>) -> Self {
         let formats = formats.into_iter().map(Into::into).collect();
         self.via(DeclaredOp::Timestamp(formats))
@@ -114,6 +114,9 @@ impl Rule {
     }
 
     pub(crate) fn compile(self) -> Result<CompiledRule, SpecError> {
+        if matches!(&self.source, Source::Coalesce(from) if from.is_empty()) {
+            return Err(invalid_argument("coalesce.from", ""));
+        }
         let via = self
             .via
             .iter()
