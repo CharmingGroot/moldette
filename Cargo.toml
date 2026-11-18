@@ -6,3 +6,6 @@ resolver = "3"
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/CharmingGroot/moldette"
+
+[workspace.dependencies]
+tracing = { version = "0.1.44", default-features = false }

@@ -2,6 +2,8 @@ use std::borrow::Cow;
 
 use moldette_core::{Mapped, OutputSchema, Response, StatusCounts};
 
+use crate::telemetry;
+
 /// Turns [`Mapped`] records into a [`Response`] for one output schema.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RespSpec {
@@ -54,12 +56,16 @@ impl RespSpec {
     where
         I: IntoIterator<Item = Mapped<'a>>,
     {
-        let responses: Vec<Response<'a>> = records
-            .into_iter()
-            .map(|mapped| self.respond(mapped))
-            .collect();
-        let counts = responses.iter().collect();
-        (responses, counts)
+        let span = telemetry::batch_span(&self.schema);
+        span.in_scope(|| {
+            let responses: Vec<Response<'a>> = records
+                .into_iter()
+                .map(|mapped| self.respond(mapped))
+                .collect();
+            let counts = responses.iter().collect();
+            telemetry::record_counts(&span, &counts);
+            (responses, counts)
+        })
     }
 
     fn emptied_fields<'a>(&'a self, mapped: &Mapped<'a>) -> Vec<Cow<'a, str>> {

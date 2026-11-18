@@ -67,6 +67,9 @@ jobs:
       - run: cargo clippy -p ${{ matrix.crate }} --all-targets
       - run: cargo test -p ${{ matrix.crate }}
       - run: cargo build -p ${{ matrix.crate }} --target wasm32-unknown-unknown
+      - run: cargo clippy -p ${{ matrix.crate }} --all-targets --all-features
+      - run: cargo test -p ${{ matrix.crate }} --all-features
+      - run: cargo build -p ${{ matrix.crate }} --target wasm32-unknown-unknown --all-features
 
   deny:
     needs: changes

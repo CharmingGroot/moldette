@@ -12,3 +12,10 @@ publish = false
 moldette-core = { path = "../moldette-core" }
 regex = "1.13.1"
 time = { version = "0.3.55", default-features = false, features = ["formatting", "parsing"] }
+tracing = { workspace = true, optional = true }
+
+[dev-dependencies]
+tracing = { workspace = true, features = ["std"] }
+
+[features]
+tracing = ["dep:tracing"]
