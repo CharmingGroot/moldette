@@ -9,12 +9,13 @@ mod enabled {
     pub(crate) use tracing::Span;
     use tracing::{Level, event, info_span, trace_span};
 
-    pub(crate) fn build_span(schema: &OutputSchema, rules: usize) -> Span {
+    pub(crate) fn build_span(schema: &OutputSchema, rules: usize, explicit_rules: bool) -> Span {
         info_span!(
             "moldette.mapper.build",
             moldette.schema.name = schema.name(),
             moldette.schema.version = schema.version(),
             moldette.mapper.rules = rules,
+            moldette.mapper.explicit_rules = explicit_rules,
         )
     }
 
@@ -55,7 +56,7 @@ mod disabled {
         }
     }
 
-    pub(crate) fn build_span(_schema: &OutputSchema, _rules: usize) -> Span {
+    pub(crate) fn build_span(_schema: &OutputSchema, _rules: usize, _explicit_rules: bool) -> Span {
         Span
     }
 

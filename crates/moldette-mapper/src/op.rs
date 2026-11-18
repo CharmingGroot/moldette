@@ -29,6 +29,16 @@ pub trait Op: fmt::Debug + Send + Sync + RefUnwindSafe {
     fn name(&self) -> &str;
 }
 
+impl<T: Op + ?Sized> Op for Arc<T> {
+    fn apply<'a>(&'a self, text: &'a str) -> Option<Cow<'a, str>> {
+        (**self).apply(text)
+    }
+
+    fn name(&self) -> &str {
+        (**self).name()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct CustomOp(Arc<dyn Op>);
 

@@ -66,7 +66,7 @@ moldette            pipeline facade, layers selected by feature
 | Layer | Components |
 |---|---|
 | parser | `json`, `delimited`, `regex`, `kv`, header + body composition |
-| mapper | rule keys `target`, `from`, `via`, `fallback` (#14); ops `trim`, `split`/`at`, `extract`, `lookup`, `const`, `coalesce`, `timestamp`; implicit coercion to string, int, float, bool, timestamp, ip; `explain` (#6, #39) |
+| mapper | rule keys `target`, `from`, `coalesce`, `constant`, `via`, `fallback` (#14); ops `trim`, `split`, `extract`, `lookup`, `timestamp`, `empty_as_none`; implicit coercion to string, int, float, bool, timestamp, ip; `explain` (#6, #39) |
 | resp | statuses `Ok`, `Malformed`, `MissingRequired`, `Emptied` (strict mode, #5); strict mode |
 
 Custom parsers and ops are registered as Rust types. Configuration has no
