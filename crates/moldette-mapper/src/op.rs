@@ -1,5 +1,8 @@
 use std::borrow::Cow;
 use std::collections::BTreeMap;
+use std::fmt;
+use std::panic::RefUnwindSafe;
+use std::sync::Arc;
 
 use moldette_core::SpecError;
 use regex::Regex;
@@ -9,6 +12,45 @@ use time::format_description::{self, OwnedFormatItem};
 use time::parsing::Parsed;
 use time::{OffsetDateTime, PrimitiveDateTime};
 
+/// A value conversion defined by the caller and added to a rule with
+/// [`Rule::via`](crate::Rule::via).
+///
+/// An op is a pure function of its text: it returns `None` for text it cannot
+/// handle (#5) and does not panic. A panic is not caught and reaches the
+/// caller of [`MapperSpec::map`](crate::MapperSpec::map) (#15).
+pub trait Op: fmt::Debug + Send + Sync + RefUnwindSafe {
+    /// Returns the converted text, borrowed from `text` or from the op where
+    /// possible, or `None` when the op cannot handle `text`.
+    fn apply<'a>(&'a self, text: &'a str) -> Option<Cow<'a, str>>;
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct CustomOp(Arc<dyn Op>);
+
+impl CustomOp {
+    pub(crate) fn new(op: impl Op + 'static) -> Self {
+        Self(Arc::new(op))
+    }
+
+    fn apply<'a>(&'a self, text: Cow<'a, str>) -> Option<Cow<'a, str>> {
+        match text {
+            Cow::Borrowed(text) => self.0.apply(text),
+            Cow::Owned(text) => self
+                .0
+                .apply(&text)
+                .map(|converted| Cow::Owned(converted.into_owned())),
+        }
+    }
+}
+
+impl PartialEq for CustomOp {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for CustomOp {}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum DeclaredOp {
     Trim,
@@ -17,6 +59,7 @@ pub(crate) enum DeclaredOp {
     Lookup(Vec<(String, String)>),
     Timestamp(Vec<String>),
     EmptyAsNone,
+    Custom(CustomOp),
 }
 
 #[derive(Debug, Clone)]
@@ -27,6 +70,7 @@ pub(crate) enum CompiledOp {
     Lookup(BTreeMap<String, String>),
     Timestamp(Vec<OwnedFormatItem>),
     EmptyAsNone,
+    Custom(CustomOp),
 }
 
 impl DeclaredOp {
@@ -63,6 +107,7 @@ impl DeclaredOp {
                     .collect::<Result<_, _>>()?,
             ),
             Self::EmptyAsNone => CompiledOp::EmptyAsNone,
+            Self::Custom(op) => CompiledOp::Custom(op.clone()),
         })
     }
 }
@@ -93,6 +138,7 @@ impl CompiledOp {
                 .and_then(|timestamp| timestamp.format(&Rfc3339).ok())
                 .map(Cow::Owned),
             Self::EmptyAsNone => (!text.is_empty()).then_some(text),
+            Self::Custom(op) => op.apply(text),
         }
     }
 }

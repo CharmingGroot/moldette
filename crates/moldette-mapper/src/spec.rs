@@ -89,16 +89,46 @@ impl MapperSpecBuilder {
 #[cfg(test)]
 mod tests {
     use std::borrow::Cow;
-    use std::thread;
+    use std::{panic, thread};
 
     use moldette_core::{Field, Timestamp, Type, Value};
 
     use super::*;
+    use crate::Op;
 
     const LOG_TIME: &str =
         "[day]/[month repr:short]/[year]:[hour]:[minute]:[second] [offset_hour][offset_minute]";
     const LOCAL_TIME: &str = "[year]-[month]-[day] [hour]:[minute]:[second]";
     const UNIX_TIME: &str = "[unix_timestamp]";
+
+    #[derive(Debug)]
+    struct StripPrefix(char);
+
+    impl Op for StripPrefix {
+        fn apply<'a>(&'a self, text: &'a str) -> Option<Cow<'a, str>> {
+            Some(Cow::Borrowed(text.strip_prefix(self.0).unwrap_or(text)))
+        }
+    }
+
+    #[derive(Debug)]
+    struct Cents;
+
+    impl Op for Cents {
+        fn apply<'a>(&'a self, text: &'a str) -> Option<Cow<'a, str>> {
+            let cents: u64 = text.parse().ok()?;
+            Some(Cow::Owned(format!("{}.{:02}", cents / 100, cents % 100)))
+        }
+    }
+
+    #[derive(Debug)]
+    struct PanicsOnEmpty;
+
+    impl Op for PanicsOnEmpty {
+        fn apply<'a>(&'a self, text: &'a str) -> Option<Cow<'a, str>> {
+            assert!(!text.is_empty(), "empty order id");
+            Some(Cow::Borrowed(text))
+        }
+    }
 
     fn order_schema() -> OutputSchema {
         OutputSchema::builder("order", 1)
@@ -115,7 +145,7 @@ mod tests {
         MapperSpec::builder(order_schema())
             .rule(Rule::new("order_id", "id").fallback("order_no"))
             .rule(Rule::new("quantity", "qty").trim().fallback("count"))
-            .rule(Rule::new("amount", "total"))
+            .rule(Rule::new("amount", "total").via(StripPrefix('$')))
             .rule(Rule::new("ordered_at", "at").timestamp([LOG_TIME, LOCAL_TIME, UNIX_TIME]))
             .build()
             .expect("valid rules")
@@ -169,6 +199,22 @@ mod tests {
             spec.map(&padded).get("order_id"),
             Some(Value::Str(Cow::Borrowed("A-1")))
         ));
+
+        let spec = MapperSpec::builder(order_schema())
+            .rule(Rule::new("order_id", "raw").trim().via(StripPrefix('#')))
+            .build()
+            .expect("valid rule");
+        let padded = record(&[("raw", " #A-1 ")]);
+        assert!(matches!(
+            spec.map(&padded).get("order_id"),
+            Some(Value::Str(Cow::Borrowed("A-1")))
+        ));
+        let mut owned = FieldRecord::new();
+        owned.insert("raw", String::from("#A-1"));
+        assert_eq!(
+            spec.map(&owned).get("order_id"),
+            Some(&Value::Str("A-1".into()))
+        );
     }
 
     #[test]
@@ -241,6 +287,17 @@ mod tests {
                 "2023-11-14 22:13:20",
                 Some("2023-11-14T22:13:20Z"),
             ),
+            (
+                Rule::new("order_id", "raw").via(Cents),
+                "1250",
+                Some("12.50"),
+            ),
+            (Rule::new("order_id", "raw").via(Cents), "12.50", None),
+            (
+                Rule::new("order_id", "raw").via(Cents).split('.', 0),
+                "1250",
+                Some("12"),
+            ),
         ];
         for (rule, text, expected) in cases {
             let mapped = map_with(rule.clone(), &[("raw", text)]);
@@ -262,6 +319,26 @@ mod tests {
         let split_first = map_with(Rule::new("quantity", "qty").split(' ', 0).trim(), &fields);
         assert_eq!(split_first.get("quantity"), None);
         assert_eq!(split_first.emptied().collect::<Vec<_>>(), ["quantity"]);
+    }
+
+    #[test]
+    fn rules_are_equal_only_when_they_share_custom_ops() {
+        let rule = Rule::new("amount", "total").via(Cents);
+        assert_eq!(rule.clone(), rule);
+        assert_ne!(Rule::new("amount", "total").via(Cents), rule);
+    }
+
+    #[test]
+    fn custom_op_panic_reaches_the_caller_and_leaves_the_spec_usable() {
+        let spec = MapperSpec::builder(order_schema())
+            .rule(Rule::new("order_id", "id").via(PanicsOnEmpty))
+            .build()
+            .expect("valid rule");
+        let empty = record(&[("id", "")]);
+        assert!(panic::catch_unwind(|| spec.map(&empty).into_owned()).is_err());
+
+        let mapped = spec.map(&record(&[("id", "A-1")]));
+        assert_eq!(mapped.get("order_id"), Some(&Value::Str("A-1".into())));
     }
 
     #[test]
@@ -433,7 +510,7 @@ mod tests {
                 let mut record = FieldRecord::new();
                 record.insert("id", format!("A-{i}"));
                 record.insert("qty", quantity);
-                record.insert("total", format!("{i}.5"));
+                record.insert("total", format!("${i}.5"));
                 record.insert("paid", if i % 2 == 0 { "true" } else { "false" });
                 record.insert("at", (1_700_000_000 + i).to_string());
                 record
