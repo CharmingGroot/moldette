@@ -10,7 +10,7 @@ use moldette_config::{
 };
 use moldette_core::{Malformed, Response, SpecError, Timestamp, Value};
 use moldette_mapper::Op;
-use moldette_parser::{Format, Parser};
+use moldette_parser::Parser;
 
 const ACCESS_LINES: [&str; 3] = [
     r#"203.0.113.7 - - [18/Nov/2026:10:15:32 +0000] "GET /orders?id=A-1 HTTP/1.1" 200 512 "-" "curl/8.5.0" "198.51.100.2, 203.0.113.7""#,
@@ -655,7 +655,7 @@ impl Parser for FixedWidth {
     }
 }
 
-fn fixed_width(arguments: &mut Arguments) -> Result<Format, LoadError> {
+fn fixed_width(arguments: &mut Arguments) -> Result<FixedWidth, LoadError> {
     let padding = if arguments.contains_key("padding") {
         arguments.character("padding")?
     } else {
@@ -671,7 +671,7 @@ fn fixed_width(arguments: &mut Arguments) -> Result<Format, LoadError> {
         columns.push(start..start + size);
         start += size;
     }
-    Ok(Format::custom(FixedWidth { columns, padding }))
+    Ok(FixedWidth { columns, padding })
 }
 
 fn registry() -> Registry {
@@ -860,6 +860,48 @@ fn rejects_names_missing_from_the_registry() {
         (
             &LoadErrorKind::UnknownOp("uper".into()),
             "mapper.rules[1].via[1].uper",
+            Some((25, 11))
+        )
+    );
+}
+
+#[test]
+fn rejects_constructed_names_other_than_the_registered_name() {
+    let mismatch = |registered: &str, reported: &str| LoadErrorKind::NameMismatch {
+        registered: registered.into(),
+        reported: reported.into(),
+    };
+    let formats = Registry::new()
+        .format("fixed", fixed_width)
+        .expect("name is free");
+    let err = build_error(
+        &FIXED_ORDERS.replace("format: fixed_width", "format: fixed"),
+        &formats,
+    );
+    assert_eq!(
+        location(&err),
+        (
+            &mismatch("fixed", "fixed_width"),
+            "parser.format",
+            Some((10, 11))
+        )
+    );
+    assert_eq!(
+        err.to_string(),
+        "parser.format: registered as `fixed` but named `fixed_width` at line 10, column 11"
+    );
+
+    let ops = registry()
+        .op("shout", |_: &mut Arguments| {
+            Ok(Arc::new(Upper) as Arc<dyn Op>)
+        })
+        .expect("name is free");
+    let err = build_error(&FIXED_ORDERS.replace("- upper", "- shout"), &ops);
+    assert_eq!(
+        location(&err),
+        (
+            &mismatch("shout", "upper"),
+            "mapper.rules[1].via[1].shout",
             Some((25, 11))
         )
     );

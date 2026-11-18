@@ -74,16 +74,16 @@ impl Arguments {
     /// Reports `error`, found by the constructor in the value of `key`, at
     /// the key path and position of that value.
     pub fn spec_error(&self, key: &str, error: SpecError) -> LoadError {
+        self.key_error(key, LoadErrorKind::Spec(error))
+    }
+
+    pub(crate) fn key_error(&self, key: &str, kind: LoadErrorKind) -> LoadError {
         let position = self
             .entries
             .iter()
             .find(|(k, _)| k.text == key)
             .map_or(self.position, |(_, node)| node.position);
-        LoadError::new(
-            LoadErrorKind::Spec(error),
-            key_path(&self.path, key),
-            position,
-        )
+        LoadError::new(kind, key_path(&self.path, key), position)
     }
 
     pub(crate) fn entries(&self) -> &[(Key, Node)] {

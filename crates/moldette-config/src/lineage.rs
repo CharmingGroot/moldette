@@ -55,7 +55,8 @@ impl LineageField {
         &self.reads
     }
 
-    /// The op names of `via` as written in the configuration.
+    /// The op names of `via`, which the build checks against the names the
+    /// ops report.
     pub fn ops(&self) -> &[String] {
         &self.ops
     }

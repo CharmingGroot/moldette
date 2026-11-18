@@ -99,6 +99,13 @@ pub enum LoadErrorKind {
     /// The parser format is neither built in nor in the
     /// [`Registry`](crate::Registry).
     UnknownFormat(String),
+    /// The op or parser built by the constructor registered under one name
+    /// reports another name, which `explain` and [`Lineage`](crate::Lineage)
+    /// would show apart.
+    NameMismatch {
+        registered: String,
+        reported: String,
+    },
     /// A layer builder or a registered constructor rejected the spec.
     Spec(SpecError),
     /// The first error of the [`Report`](crate::Report) of
@@ -136,6 +143,10 @@ impl fmt::Display for LoadErrorKind {
             }
             Self::UnknownOp(name) => write!(f, "unknown op `{name}`"),
             Self::UnknownFormat(name) => write!(f, "unknown format `{name}`"),
+            Self::NameMismatch {
+                registered,
+                reported,
+            } => write!(f, "registered as `{registered}` but named `{reported}`"),
             Self::Spec(error) => write!(f, "{error}"),
             Self::Diagnostic(kind) => write!(f, "{kind}"),
         }

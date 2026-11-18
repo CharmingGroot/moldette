@@ -3,14 +3,15 @@ use std::fmt;
 use std::sync::Arc;
 
 use moldette_mapper::Op;
-use moldette_parser::Format;
+use moldette_parser::{Format, Parser};
 
 use crate::arguments::Arguments;
 use crate::error::{LoadError, LoadErrorKind};
 use crate::model::{BUILT_IN_FORMATS, BUILT_IN_OPS, built_in_keys};
 
 type OpConstructor = dyn Fn(&mut Arguments) -> Result<Arc<dyn Op>, LoadError> + Send + Sync;
-type FormatConstructor = dyn Fn(&mut Arguments) -> Result<Format, LoadError> + Send + Sync;
+type FormatConstructor =
+    dyn Fn(&mut Arguments) -> Result<(String, Format), LoadError> + Send + Sync;
 
 /// Constructors of the caller-defined ops and formats a configuration names.
 /// It is passed to [`Config::build`](crate::Config::build); nothing is
@@ -27,7 +28,8 @@ impl Registry {
     }
 
     /// Registers the constructor of the op named `name` in `via`. Fails when
-    /// `name` is a built-in op or is already registered.
+    /// `name` is a built-in op or is already registered; the build fails when
+    /// [`Op::name`] of the constructed op is not `name`.
     pub fn op(
         mut self,
         name: impl Into<String>,
@@ -42,19 +44,23 @@ impl Registry {
         Ok(self)
     }
 
-    /// Registers the constructor of the parser format named `name` in
-    /// `format`. Fails when `name` is a built-in format or is already
-    /// registered.
-    pub fn format(
+    /// Registers the constructor of the parser named `name` in `format`.
+    /// Fails when `name` is a built-in format or is already registered; the
+    /// build fails when [`Parser::name`] of the constructed parser is not
+    /// `name`.
+    pub fn format<P: Parser + 'static>(
         mut self,
         name: impl Into<String>,
-        constructor: impl Fn(&mut Arguments) -> Result<Format, LoadError> + Send + Sync + 'static,
+        constructor: impl Fn(&mut Arguments) -> Result<P, LoadError> + Send + Sync + 'static,
     ) -> Result<Self, RegistryError> {
         insert(
             &mut self.formats,
             &BUILT_IN_FORMATS,
             name.into(),
-            Box::new(constructor),
+            Box::new(move |arguments: &mut Arguments| {
+                let parser = constructor(arguments)?;
+                Ok((parser.name().to_owned(), Format::custom(parser)))
+            }),
         )?;
         Ok(self)
     }
@@ -64,11 +70,15 @@ impl Registry {
         name: &str,
         arguments: &Arguments,
     ) -> Result<Arc<dyn Op>, LoadError> {
-        construct(
+        let op = construct(
             self.ops.get(name).map(Box::as_ref),
             arguments,
             LoadErrorKind::UnknownOp(name.to_owned()),
-        )
+        )?;
+        if op.name() != name {
+            return Err(arguments.error(name_mismatch(name, op.name())));
+        }
+        Ok(op)
     }
 
     pub(crate) fn build_format(
@@ -76,11 +86,15 @@ impl Registry {
         name: &str,
         arguments: &Arguments,
     ) -> Result<Format, LoadError> {
-        construct(
+        let (reported, format) = construct(
             self.formats.get(name).map(Box::as_ref),
             arguments,
             LoadErrorKind::UnknownFormat(name.to_owned()),
-        )
+        )?;
+        if reported != name {
+            return Err(arguments.key_error("format", name_mismatch(name, &reported)));
+        }
+        Ok(format)
     }
 }
 
@@ -90,6 +104,13 @@ impl fmt::Debug for Registry {
             .field("ops", &self.ops.keys().collect::<Vec<_>>())
             .field("formats", &self.formats.keys().collect::<Vec<_>>())
             .finish()
+    }
+}
+
+fn name_mismatch(registered: &str, reported: &str) -> LoadErrorKind {
+    LoadErrorKind::NameMismatch {
+        registered: registered.to_owned(),
+        reported: reported.to_owned(),
     }
 }
 
