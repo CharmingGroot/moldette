@@ -1,5 +1,4 @@
-use crate::arguments::Arguments;
-use crate::error::{LoadError, LoadErrorKind, Position, ValueKind};
+use crate::error::{LoadError, LoadErrorKind, ValueKind};
 use crate::node::{Key, Node, NodeValue, Scalar, index_path, key_path};
 
 #[derive(Debug)]
@@ -94,23 +93,11 @@ impl<'n> Cursor<'n> {
 }
 
 pub(crate) struct MapReader<'n> {
-    entries: &'n [(Key, Node)],
-    cursor: Cursor<'n>,
+    pub(crate) entries: &'n [(Key, Node)],
+    pub(crate) cursor: Cursor<'n>,
 }
 
 impl<'n> MapReader<'n> {
-    pub(crate) fn arguments(&self, excluded: &[&str], position: Option<Position>) -> Arguments {
-        Arguments::new(
-            self.entries
-                .iter()
-                .filter(|(key, _)| !excluded.contains(&key.text.as_str()))
-                .cloned()
-                .collect(),
-            self.cursor.path.clone(),
-            position,
-        )
-    }
-
     pub(crate) fn entries(&self) -> impl Iterator<Item = (&'n str, Cursor<'n>)> + '_ {
         self.entries.iter().map(|(key, node)| {
             (

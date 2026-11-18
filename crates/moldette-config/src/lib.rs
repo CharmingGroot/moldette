@@ -18,26 +18,30 @@
 
 mod arguments;
 mod check;
-mod decode;
+mod cursor;
+mod diagnostic;
 mod digest;
 mod error;
+mod fields;
 mod json;
 mod lineage;
 mod lower;
 mod model;
 mod node;
+mod position;
 mod registry;
 mod yaml;
 
 pub use arguments::{Argument, Arguments};
-pub use check::{Diagnostic, DiagnosticKind, Report, Severity};
-pub use error::{LoadError, LoadErrorKind, Position, ValueKind};
+pub use diagnostic::{Diagnostic, DiagnosticKind, Report, Severity};
+pub use error::{LoadError, LoadErrorKind, ValueKind};
 pub use lineage::{Lineage, LineageField, LineagePath, LineageRead, LineageSource};
 pub use lower::Specs;
 pub use model::{
     BodyEntry, Config, FieldEntry, FormatEntry, MapperSection, OpEntry, ParserSection, RespSection,
     RuleEntry, SchemaEntry, SchemaRef, SourceEntry,
 };
+pub use position::Position;
 pub use registry::{Registry, RegistryError};
 
 #[cfg(test)]

@@ -3,7 +3,7 @@ use std::borrow::Cow;
 use moldette_core::{Malformed, SpecError};
 use regex::Regex;
 
-use crate::delimited::without_line_break;
+use crate::text::without_line_break;
 
 #[derive(Debug, Clone)]
 pub(crate) struct RegexGroups {

@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
-use crate::error::{LoadError, LoadErrorKind, Position};
+use crate::error::{LoadError, LoadErrorKind};
+use crate::position::Position;
 
 #[derive(Debug, Clone, Eq)]
 pub(crate) struct Node {

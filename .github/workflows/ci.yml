@@ -45,6 +45,12 @@ jobs:
           components: rustfmt
       - run: cargo fmt --all --check
 
+  modules:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: python3 scripts/module_graph.py --print
+
   crate:
     needs: changes
     if: needs.changes.outputs.crates != '[]'
@@ -91,7 +97,7 @@ jobs:
 
   # Single required check; see #9.
   ci-ok:
-    needs: [changes, fmt, crate, deny]
+    needs: [changes, fmt, modules, crate, deny]
     if: always()
     runs-on: ubuntu-latest
     steps:

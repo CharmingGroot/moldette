@@ -2,8 +2,9 @@ use yaml_rust2::Event;
 use yaml_rust2::parser::Parser;
 use yaml_rust2::scanner::{Marker, TScalarStyle};
 
-use crate::error::{LoadError, LoadErrorKind, Position, ValueKind};
+use crate::error::{LoadError, LoadErrorKind, ValueKind};
 use crate::node::{Key, MAX_DEPTH, Node, NodeValue, Scalar, index_path, key_path};
+use crate::position::Position;
 
 pub(crate) fn read(text: &str) -> Result<Node, LoadError> {
     let mut builder = Builder::default();
