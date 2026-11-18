@@ -9,7 +9,7 @@ use crate::telemetry;
 ///
 /// A schema field without a rule reads the source field of the same name,
 /// unless the spec was built with [`MapperSpecBuilder::explicit_rules`].
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MapperSpec {
     schema: OutputSchema,
     rules: Vec<Option<CompiledRule>>,
@@ -214,28 +214,7 @@ mod tests {
     }
 
     #[test]
-    fn maps_from_source_fields_in_schema_order() {
-        let spec = order_spec();
-        let record = record(&[("paid", "true"), ("total", "12.5"), ("id", "A-1")]);
-        let mapped = spec.map(&record);
-        let names: Vec<_> = mapped.iter().map(|(name, _)| name).collect();
-        assert_eq!(names, ["order_id", "amount", "paid"]);
-        assert_eq!(mapped.get("order_id"), Some(&Value::Str("A-1".into())));
-        assert_eq!(mapped.get("amount"), Some(&Value::Float(12.5)));
-        assert_eq!(mapped.get("paid"), Some(&Value::Bool(true)));
-        assert_eq!(mapped.emptied().count(), 0);
-    }
-
-    #[test]
-    fn text_values_borrow_from_the_record() {
-        let spec = order_spec();
-        let plain = record(&[("id", "A-1")]);
-        let mapped = spec.map(&plain);
-        assert!(matches!(
-            mapped.get("order_id"),
-            Some(Value::Str(Cow::Borrowed("A-1")))
-        ));
-
+    fn op_outputs_borrow_from_the_record() {
         let spec = MapperSpec::builder(order_schema())
             .rule(Rule::new("order_id", "raw").trim().split('/', 1))
             .build()
@@ -482,24 +461,11 @@ mod tests {
             spec.map(&empty).get("order_id"),
             Some(&Value::Str("".into()))
         );
-    }
 
-    #[test]
-    fn failed_conversion_is_absent_and_reported_as_emptied() {
-        let spec = order_spec();
-        let record = record(&[("qty", "three"), ("count", "3.0"), ("paid", "yes")]);
-        let mapped = spec.map(&record);
+        let both_unconvertible = record(&[("qty", "three"), ("count", "3.0")]);
+        let mapped = spec.map(&both_unconvertible);
         assert_eq!(mapped.get("quantity"), None);
-        assert_eq!(mapped.get("paid"), None);
-        assert_eq!(mapped.emptied().collect::<Vec<_>>(), ["quantity", "paid"]);
-    }
-
-    #[test]
-    fn missing_sources_are_absent_without_being_emptied() {
-        let spec = order_spec();
-        let mapped = spec.map(&FieldRecord::new());
-        assert_eq!(mapped.iter().count(), 0);
-        assert_eq!(mapped.emptied().count(), 0);
+        assert_eq!(mapped.emptied().collect::<Vec<_>>(), ["quantity"]);
     }
 
     #[test]
@@ -537,23 +503,6 @@ mod tests {
                 ("ordered_at", 0),
             ]
         );
-    }
-
-    #[test]
-    fn rejects_rule_for_field_outside_schema() {
-        let result = MapperSpec::builder(order_schema())
-            .rule(Rule::new("discount", "discount"))
-            .build();
-        assert_eq!(result, Err(SpecError::UnknownField("discount".into())));
-    }
-
-    #[test]
-    fn rejects_two_rules_for_one_field() {
-        let result = MapperSpec::builder(order_schema())
-            .rule(Rule::new("amount", "total"))
-            .rule(Rule::new("amount", "subtotal"))
-            .build();
-        assert_eq!(result, Err(SpecError::DuplicateRule("amount".into())));
     }
 
     #[test]

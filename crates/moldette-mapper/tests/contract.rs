@@ -130,12 +130,15 @@ fn leaves_missing_sources_absent_without_reporting_them_as_emptied() {
     let spec = MapperSpec::builder(schema([
         Field::new("id", Type::String),
         Field::new("amount", Type::Float),
+        Field::new("quantity", Type::Int),
     ]))
+    .rule(Rule::new("quantity", "qty").fallback("count"))
     .build()
     .expect("valid spec");
 
     let mapped = spec.map(&record(&[("id", "A-1")]));
     assert_eq!(mapped.get("amount"), None);
+    assert_eq!(mapped.get("quantity"), None);
     assert_eq!(mapped.emptied().count(), 0);
 }
 

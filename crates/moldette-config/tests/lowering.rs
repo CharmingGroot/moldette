@@ -208,6 +208,42 @@ parser:
             }
         }
 
+        mod regex {
+            use moldette_parser::{Format, ParserSpec};
+
+            use crate::access_log_specs;
+
+            #[test]
+            fn builds_the_access_log_parser_spec() {
+                let expected = [
+                    "remote_addr",
+                    "time_local",
+                    "method",
+                    "uri",
+                    "protocol",
+                    "status",
+                    "bytes",
+                    "referer",
+                    "agent",
+                    "forwarded_for",
+                ]
+                .into_iter()
+                .fold(
+                    ParserSpec::builder(Format::Regex {
+                        pattern: r#"^(?P<remote_addr>\S+) \S+ \S+ \[(?P<time_local>[^\]]+)\] "(?P<method>\S+) (?P<uri>\S+) (?P<protocol>[^"]+)" (?P<status>\d{3}) (?P<bytes>\d+|-) "(?P<referer>[^"]*)" "(?P<agent>[^"]*)" "(?P<forwarded_for>[^"]*)"$"#
+                            .into(),
+                    }),
+                    |builder, name| builder.field(name, name),
+                )
+                .empty_as_none()
+                .build()
+                .expect("valid spec");
+                for specs in access_log_specs() {
+                    assert_eq!(specs.parser(), Some(&expected));
+                }
+            }
+        }
+
         mod custom {
             use crate::common::{FIXED_ORDERS, build_yaml, registry};
 

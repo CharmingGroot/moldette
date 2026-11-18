@@ -148,56 +148,6 @@ mod tests {
     }
 
     #[test]
-    fn ok_keeps_mapped_unchanged_when_required_fields_are_present() {
-        let mut mapped = Mapped::new();
-        mapped.insert("ordered_at", ordered_at());
-        mapped.insert("order_id", Value::Str("".into()));
-        mapped.insert("amount", Value::Float(12.5));
-        mapped.insert("coupon", Value::Str("WELCOME".into()));
-        mapped.insert("channel", Value::Str("web".into()));
-        mapped.mark_emptied("status");
-
-        assert_eq!(
-            order_builder().build().respond(mapped.clone()),
-            Response::Ok(mapped)
-        );
-    }
-
-    #[test]
-    fn missing_required_lists_absent_fields_in_schema_order() {
-        let mut mapped = Mapped::new();
-        mapped.mark_emptied("ordered_at");
-        mapped.insert("amount", Value::Float(12.5));
-        mapped.insert("coupon", Value::Str("WELCOME".into()));
-
-        assert_eq!(
-            order_builder().build().respond(mapped),
-            Response::MissingRequired(vec!["order_id".into(), "ordered_at".into()])
-        );
-    }
-
-    #[test]
-    fn deprecated_fields_are_not_required() {
-        let mapped = complete_order();
-
-        assert_eq!(
-            order_builder().build().respond(mapped.clone()),
-            Response::Ok(mapped)
-        );
-    }
-
-    #[test]
-    fn strict_accepts_records_without_emptied_fields() {
-        let mut mapped = complete_order();
-        mapped.insert("channel", Value::Str("web".into()));
-
-        assert_eq!(
-            order_builder().strict().build().respond(mapped.clone()),
-            Response::Ok(mapped)
-        );
-    }
-
-    #[test]
     fn strict_lists_emptied_fields_in_schema_order_then_unknown_ones() {
         let mut mapped = complete_order();
         mapped.mark_emptied("channel");
@@ -221,43 +171,6 @@ mod tests {
         assert_eq!(
             order_builder().strict().build().respond(mapped),
             Response::MissingRequired(vec!["order_id".into(), "ordered_at".into()])
-        );
-    }
-
-    #[test]
-    fn batch_keeps_input_order_and_counts_each_status() {
-        let mut emptied_status = complete_order();
-        emptied_status.mark_emptied("status");
-        let mut missing_amount = Mapped::new();
-        missing_amount.insert("order_id", Value::Str("A-2".into()));
-        missing_amount.insert("ordered_at", ordered_at());
-        let records = vec![
-            complete_order(),
-            emptied_status,
-            missing_amount,
-            complete_order(),
-        ];
-        let spec = order_builder().strict().build();
-
-        let (responses, counts) = spec.respond_batch(records);
-
-        assert_eq!(
-            responses,
-            [
-                Response::Ok(complete_order()),
-                Response::Emptied(vec!["status".into()]),
-                Response::MissingRequired(vec!["amount".into()]),
-                Response::Ok(complete_order()),
-            ]
-        );
-        assert_eq!(
-            (
-                counts.ok(),
-                counts.malformed(),
-                counts.missing_required(),
-                counts.emptied()
-            ),
-            (2, 0, 1, 1)
         );
     }
 

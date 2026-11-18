@@ -148,7 +148,7 @@ fn unreadable_records_are_malformed_with_a_reason() {
 }
 
 #[test]
-fn rejects_invalid_paths_and_repeated_names_at_build() {
+fn rejects_invalid_paths_and_empty_or_repeated_names_at_build() {
     for case in cases() {
         let invalid = ParserSpec::builder(case.format.clone())
             .field("id", case.invalid_path)
@@ -166,6 +166,15 @@ fn rejects_invalid_paths_and_repeated_names_at_build() {
         assert_eq!(
             repeated.map(drop),
             Err(SpecError::DuplicateField("id".into())),
+            "{:?}",
+            case.format
+        );
+        let empty = ParserSpec::builder(case.format.clone())
+            .field("", case.paths[1])
+            .build();
+        assert_eq!(
+            empty.map(drop),
+            Err(SpecError::EmptyFieldName),
             "{:?}",
             case.format
         );
