@@ -17,6 +17,10 @@ impl RespSpec {
         }
     }
 
+    pub fn schema(&self) -> &OutputSchema {
+        &self.schema
+    }
+
     /// Returns [`Response::MissingRequired`] with every required, non-deprecated
     /// field absent from `mapped`, in schema order. Otherwise, in strict mode,
     /// returns [`Response::Emptied`] with the emptied fields in schema order,
@@ -126,6 +130,15 @@ mod tests {
         mapped.insert("amount", Value::Float(12.5));
         mapped.insert("ordered_at", ordered_at());
         mapped
+    }
+
+    #[test]
+    fn schema_exposes_name_and_version() {
+        let spec = order_builder().build();
+        assert_eq!(
+            (spec.schema().name(), spec.schema().version()),
+            ("order", 1)
+        );
     }
 
     #[test]
