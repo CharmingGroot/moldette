@@ -1,7 +1,7 @@
-use moldette_core::{FieldRecord, Mapped, OutputSchema, SpecError};
+use moldette_core::{Explain, FieldRecord, Mapped, OutputSchema, SpecError};
 
 use crate::Rule;
-use crate::recorder::{Discard, Recorder};
+use crate::recorder::{Discard, ExplainRecorder, Recorder};
 use crate::rule::CompiledRule;
 
 /// Rules for every field of an output schema, validated and immutable.
@@ -29,6 +29,14 @@ impl MapperSpec {
     /// borrow from the spec, and other text values borrow from the record.
     pub fn map<'a>(&'a self, record: &FieldRecord<'a>) -> Mapped<'a> {
         self.run(record, &mut Discard)
+    }
+
+    /// Maps one record like [`MapperSpec::map`] and records, for each field,
+    /// the sources read, the output of each op and the converted value.
+    pub fn explain<'a>(&'a self, record: &FieldRecord<'a>) -> (Mapped<'a>, Explain<'a>) {
+        let mut recorder = ExplainRecorder::new(&self.schema);
+        let mapped = self.run(record, &mut recorder);
+        (mapped, recorder.finish())
     }
 
     fn run<'a, R: Recorder<'a>>(
@@ -90,7 +98,9 @@ mod tests {
     use std::borrow::Cow;
     use std::{panic, thread};
 
-    use moldette_core::{Field, Timestamp, Type, Value};
+    use moldette_core::{
+        ExplainField, ExplainRead, ExplainSource, ExplainStep, Field, Timestamp, Type, Value,
+    };
 
     use super::*;
     use crate::Op;
@@ -108,6 +118,10 @@ mod tests {
         fn apply<'a>(&'a self, text: &'a str) -> Option<Cow<'a, str>> {
             Some(Cow::Borrowed(text.strip_prefix(self.0).unwrap_or(text)))
         }
+
+        fn name(&self) -> &str {
+            "strip_prefix"
+        }
     }
 
     #[derive(Debug)]
@@ -118,6 +132,10 @@ mod tests {
             let cents: u64 = text.parse().ok()?;
             Some(Cow::Owned(format!("{}.{:02}", cents / 100, cents % 100)))
         }
+
+        fn name(&self) -> &str {
+            "cents"
+        }
     }
 
     #[derive(Debug)]
@@ -127,6 +145,10 @@ mod tests {
         fn apply<'a>(&'a self, text: &'a str) -> Option<Cow<'a, str>> {
             assert!(!text.is_empty(), "empty order id");
             Some(Cow::Borrowed(text))
+        }
+
+        fn name(&self) -> &str {
+            "panics_on_empty"
         }
     }
 
@@ -498,7 +520,7 @@ mod tests {
     }
 
     #[test]
-    fn shared_spec_maps_the_same_from_several_threads() {
+    fn shared_spec_maps_and_explains_the_same_from_several_threads() {
         let spec = order_spec();
         let records: Vec<_> = (0..64)
             .map(|i| {
@@ -516,12 +538,19 @@ mod tests {
                 record
             })
             .collect();
-        let expected: Vec<_> = records.iter().map(|r| spec.map(r)).collect();
+        let run = || {
+            records
+                .iter()
+                .map(|r| (spec.map(r), spec.explain(r)))
+                .collect::<Vec<_>>()
+        };
+        let expected = run();
+        for (mapped, (explained, _)) in &expected {
+            assert_eq!(explained, mapped);
+        }
 
         thread::scope(|scope| {
-            let handles: Vec<_> = (0..4)
-                .map(|_| scope.spawn(|| records.iter().map(|r| spec.map(r)).collect::<Vec<_>>()))
-                .collect();
+            let handles: Vec<_> = (0..4).map(|_| scope.spawn(run)).collect();
             for handle in handles {
                 assert_eq!(handle.join().expect("thread finished"), expected);
             }
@@ -545,7 +574,7 @@ mod tests {
         }
 
         fn step(&mut self, op: &'a CompiledOp, output: Option<&Cow<'a, str>>) {
-            self.0.push(format!("step {op:?} {output:?}"));
+            self.0.push(format!("step {} {output:?}", op.name()));
         }
 
         fn coerced(&mut self, value: Option<&Value<'a>>) {
@@ -582,16 +611,117 @@ mod tests {
                 "field quantity",
                 "read qty None",
                 r#"read count Some(" x pcs")"#,
-                r#"step Trim Some("x pcs")"#,
-                r#"step Split { separator: ' ', index: 0 } Some("x")"#,
+                r#"step trim Some("x pcs")"#,
+                r#"step split Some("x")"#,
                 "coerced None",
                 r#"read n Some("4")"#,
-                r#"step Trim Some("4")"#,
-                r#"step Split { separator: ' ', index: 0 } Some("4")"#,
+                r#"step trim Some("4")"#,
+                r#"step split Some("4")"#,
                 "coerced Some(Int(4))",
                 "field order_id",
                 r#"constant """#,
-                "step EmptyAsNone None",
+                "step empty_as_none None",
+            ]
+        );
+    }
+
+    fn explained<'a>(
+        source: ExplainSource<'a>,
+        text: Option<&'a str>,
+        steps: &[(&'a str, Option<&'a str>)],
+        value: Option<Value<'a>>,
+    ) -> ExplainRead<'a> {
+        let mut read = ExplainRead::new(source, text.map(Cow::Borrowed));
+        for &(op, output) in steps {
+            read.push(ExplainStep::new(op, output.map(Cow::Borrowed)));
+        }
+        if let Some(value) = value {
+            read.set_value(value);
+        }
+        read
+    }
+
+    fn explained_field<'a>(
+        name: &'a str,
+        reads: impl IntoIterator<Item = ExplainRead<'a>>,
+    ) -> ExplainField<'a> {
+        let mut field = ExplainField::new(name);
+        for read in reads {
+            field.push(read);
+        }
+        field
+    }
+
+    #[test]
+    fn explain_records_reads_op_outputs_and_conversions() {
+        let schema = OutputSchema::builder("order", 3)
+            .field(Field::new("quantity", Type::Int))
+            .field(Field::new("amount", Type::Float))
+            .field(Field::new("currency", Type::String))
+            .field(Field::new("paid", Type::Bool))
+            .build()
+            .expect("valid schema");
+        let spec = MapperSpec::builder(schema)
+            .rule(
+                Rule::coalesce("quantity", ["qty", "count"])
+                    .trim()
+                    .split(' ', 0)
+                    .fallback("n"),
+            )
+            .rule(Rule::new("amount", "total").via(Cents).fallback("subtotal"))
+            .rule(Rule::constant("currency", "usd").lookup([("usd", "USD")]))
+            .build()
+            .expect("valid rules");
+        let record = record(&[
+            ("count", " x pcs"),
+            ("n", "4"),
+            ("total", "12.50"),
+            ("paid", "yes"),
+        ]);
+
+        let (mapped, explain) = spec.explain(&record);
+
+        assert_eq!(mapped, spec.map(&record));
+        assert_eq!((explain.schema(), explain.version()), ("order", 3));
+        let field = |name| ExplainSource::Field(Cow::Borrowed(name));
+        assert_eq!(
+            explain.fields(),
+            [
+                explained_field(
+                    "quantity",
+                    [
+                        explained(field("qty"), None, &[], None),
+                        explained(
+                            field("count"),
+                            Some(" x pcs"),
+                            &[("trim", Some("x pcs")), ("split", Some("x"))],
+                            None,
+                        ),
+                        explained(
+                            field("n"),
+                            Some("4"),
+                            &[("trim", Some("4")), ("split", Some("4"))],
+                            Some(Value::Int(4)),
+                        ),
+                    ],
+                ),
+                explained_field(
+                    "amount",
+                    [
+                        explained(field("total"), Some("12.50"), &[("cents", None)], None),
+                        explained(field("subtotal"), None, &[], None),
+                    ],
+                ),
+                explained_field(
+                    "currency",
+                    [explained(
+                        ExplainSource::Constant,
+                        Some("usd"),
+                        &[("lookup", Some("USD"))],
+                        Some(Value::Str("USD".into())),
+                    )],
+                ),
+                explained_field("paid", [explained(field("paid"), Some("yes"), &[], None)],),
             ]
         );
     }

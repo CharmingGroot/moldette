@@ -47,6 +47,10 @@ impl Op for StripPrefix {
     fn apply<'a>(&'a self, text: &'a str) -> Option<Cow<'a, str>> {
         Some(Cow::Borrowed(text.strip_prefix(self.0).unwrap_or(text)))
     }
+
+    fn name(&self) -> &str {
+        "strip_prefix"
+    }
 }
 
 fn borrowing_spec() -> MapperSpec {

@@ -8,6 +8,7 @@
 //! failed type conversions also yield `None` (#5, #13).
 
 mod error;
+mod explain;
 mod mapped;
 mod names;
 mod record;
@@ -17,6 +18,7 @@ mod timestamp;
 mod value;
 
 pub use error::SpecError;
+pub use explain::{Explain, ExplainField, ExplainRead, ExplainSource, ExplainStep};
 pub use mapped::Mapped;
 pub use names::validate_field_names;
 pub use record::FieldRecord;
@@ -40,5 +42,10 @@ mod tests {
         assert_send_sync::<StatusCounts>();
         assert_send_sync::<OutputSchema>();
         assert_send_sync::<SpecError>();
+        assert_send_sync::<Explain<'_>>();
+        assert_send_sync::<ExplainField<'_>>();
+        assert_send_sync::<ExplainRead<'_>>();
+        assert_send_sync::<ExplainSource<'_>>();
+        assert_send_sync::<ExplainStep<'_>>();
     }
 }
