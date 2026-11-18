@@ -1,0 +1,13 @@
+[package]
+name = "moldette-mapper"
+version = "0.0.0"
+description = "Maps parsed fields onto a declared output schema"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+# Kept unpublished until the first public release (#10).
+publish = false
+
+[dependencies]
+moldette-core = { path = "../moldette-core" }
+time = { version = "0.3.55", default-features = false, features = ["parsing"] }
