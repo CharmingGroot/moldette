@@ -2,6 +2,8 @@ use std::fmt;
 
 use moldette_core::SpecError;
 
+use crate::check::DiagnosticKind;
+
 /// An error found while reading a configuration, with the key path and, when
 /// the reader reports one, the position of the offending node.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,15 +40,24 @@ impl LoadError {
 
 impl fmt::Display for LoadError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if !self.path.is_empty() {
-            write!(f, "{}: ", self.path)?;
-        }
-        write!(f, "{}", self.kind)?;
-        if let Some(position) = self.position {
-            write!(f, " at line {}, column {}", position.line, position.column)?;
-        }
-        Ok(())
+        write_located(f, &self.path, &self.kind, self.position)
     }
+}
+
+pub(crate) fn write_located(
+    f: &mut fmt::Formatter<'_>,
+    path: &str,
+    message: &dyn fmt::Display,
+    position: Option<Position>,
+) -> fmt::Result {
+    if !path.is_empty() {
+        write!(f, "{path}: ")?;
+    }
+    write!(f, "{message}")?;
+    if let Some(position) = position {
+        write!(f, " at line {}, column {}", position.line, position.column)?;
+    }
+    Ok(())
 }
 
 impl std::error::Error for LoadError {}
@@ -90,6 +101,9 @@ pub enum LoadErrorKind {
     UnknownFormat(String),
     /// A layer builder or a registered constructor rejected the spec.
     Spec(SpecError),
+    /// The first error of the [`Report`](crate::Report) of
+    /// [`Config::check`](crate::Config::check).
+    Diagnostic(DiagnosticKind),
 }
 
 impl fmt::Display for LoadErrorKind {
@@ -123,6 +137,7 @@ impl fmt::Display for LoadErrorKind {
             Self::UnknownOp(name) => write!(f, "unknown op `{name}`"),
             Self::UnknownFormat(name) => write!(f, "unknown format `{name}`"),
             Self::Spec(error) => write!(f, "{error}"),
+            Self::Diagnostic(kind) => write!(f, "{kind}"),
         }
     }
 }

@@ -9,8 +9,13 @@
 //! [`Config::build`] calls the parser, mapper and resp builders for the
 //! sections present. Caller-defined ops and formats come from a [`Registry`]
 //! passed to the call.
+//!
+//! [`Config::check`] reports what the sections get wrong together, such as a
+//! rule reading a field the parser never outputs. Errors fail the build, and
+//! warnings are kept in [`Specs::report`].
 
 mod arguments;
+mod check;
 mod decode;
 mod error;
 mod json;
@@ -21,6 +26,7 @@ mod registry;
 mod yaml;
 
 pub use arguments::{Argument, Arguments};
+pub use check::{Diagnostic, DiagnosticKind, Report, Severity};
 pub use error::{LoadError, LoadErrorKind, Position, ValueKind};
 pub use lower::Specs;
 pub use model::{
@@ -44,5 +50,9 @@ mod tests {
         assert_send_sync::<Registry>();
         assert_send_sync::<RegistryError>();
         assert_send_sync::<Specs>();
+        assert_send_sync::<Report>();
+        assert_send_sync::<Diagnostic>();
+        assert_send_sync::<DiagnosticKind>();
+        assert_send_sync::<Severity>();
     }
 }
