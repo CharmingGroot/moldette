@@ -6,6 +6,7 @@ use moldette_resp::RespSpec;
 use crate::check::Report;
 use crate::digest::digest;
 use crate::error::{LoadError, LoadErrorKind, Position};
+use crate::lineage::{Lineage, lineage};
 use crate::model::{
     Config, FieldEntry, FormatEntry, MapperSection, OpEntry, ParserSection, RespSection, RuleEntry,
     SchemaEntry, SchemaRef, SourceEntry,
@@ -24,6 +25,7 @@ pub struct Specs {
     mapper: Option<MapperSpec>,
     resp: Option<RespSpec>,
     report: Report,
+    lineage: Option<Lineage>,
 }
 
 impl Specs {
@@ -38,6 +40,12 @@ impl Specs {
     /// [`Config::build`] fails on an error.
     pub fn report(&self) -> &Report {
         &self.report
+    }
+
+    /// The lineage of the mapper's output schema, or `None` without a mapper
+    /// section.
+    pub fn lineage(&self) -> Option<&Lineage> {
+        self.lineage.as_ref()
     }
 
     pub fn schemas(&self) -> &[OutputSchema] {
@@ -92,6 +100,7 @@ impl Config {
             mapper,
             resp,
             report,
+            lineage: lineage(self),
         })
     }
 }

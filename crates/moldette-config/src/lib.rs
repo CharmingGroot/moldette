@@ -13,7 +13,8 @@
 //! [`Config::check`] reports what the sections get wrong together, such as a
 //! rule reading a field the parser never outputs. Errors fail the build, and
 //! warnings are kept in [`Specs::report`]. [`Specs::digest`] identifies the
-//! configuration the specs were built from.
+//! configuration the specs were built from, and [`Specs::lineage`] traces each
+//! output field back to the raw record.
 
 mod arguments;
 mod check;
@@ -21,6 +22,7 @@ mod decode;
 mod digest;
 mod error;
 mod json;
+mod lineage;
 mod lower;
 mod model;
 mod node;
@@ -30,6 +32,7 @@ mod yaml;
 pub use arguments::{Argument, Arguments};
 pub use check::{Diagnostic, DiagnosticKind, Report, Severity};
 pub use error::{LoadError, LoadErrorKind, Position, ValueKind};
+pub use lineage::{Lineage, LineageField, LineagePath, LineageRead, LineageSource};
 pub use lower::Specs;
 pub use model::{
     BodyEntry, Config, FieldEntry, FormatEntry, MapperSection, OpEntry, ParserSection, RespSection,
@@ -56,5 +59,10 @@ mod tests {
         assert_send_sync::<Diagnostic>();
         assert_send_sync::<DiagnosticKind>();
         assert_send_sync::<Severity>();
+        assert_send_sync::<Lineage>();
+        assert_send_sync::<LineageField>();
+        assert_send_sync::<LineageSource>();
+        assert_send_sync::<LineageRead>();
+        assert_send_sync::<LineagePath>();
     }
 }
