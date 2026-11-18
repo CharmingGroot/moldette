@@ -66,8 +66,8 @@ moldette            pipeline facade, layers selected by feature
 | Layer | Components |
 |---|---|
 | parser | `json`, `delimited`, `regex`, `kv`, header + body composition |
-| mapper | rule keys `target`, `from`, `via`, `fallback` (#14); ops `trim`, `split`/`at`, `extract`, `lookup`, `const`, `coalesce`, `timestamp`; implicit coercion to string, int, float, bool, timestamp, ip |
-| resp | statuses `Ok`, `Malformed`, `MissingRequired`, `Emptied` (strict mode, #5); `explain` (#6); strict mode |
+| mapper | rule keys `target`, `from`, `via`, `fallback` (#14); ops `trim`, `split`/`at`, `extract`, `lookup`, `const`, `coalesce`, `timestamp`; implicit coercion to string, int, float, bool, timestamp, ip; `explain` (#6, #39) |
+| resp | statuses `Ok`, `Malformed`, `MissingRequired`, `Emptied` (strict mode, #5); strict mode |
 
 Custom parsers and ops are registered as Rust types. Configuration has no
 expression language (#4).
@@ -117,13 +117,14 @@ use core types only.
 6. custom op registration (#15)
 7. spans and events
 8. standalone and multi-threaded tests
+9. `explain` (#39)
 
 ### M3 resp
 
 1. standalone API
 2. statuses
 3. emptied-field report, strict mode
-4. `explain`, spec version
+4. spec version (`RespSpec::schema()`)
 5. batch API
 6. per-status counts; durations from `tracing` spans (#7)
 7. standalone tests
