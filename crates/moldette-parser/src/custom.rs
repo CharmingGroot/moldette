@@ -17,6 +17,9 @@ pub trait Parser: fmt::Debug + Send + Sync + RefUnwindSafe {
     /// A field location resolved from the text of a path.
     type Path: fmt::Debug + Send + Sync + RefUnwindSafe;
 
+    /// The name of the format, used by configuration and `tracing` signals.
+    fn name(&self) -> &str;
+
     /// Resolves `path`, or returns `None` when it names no field of this
     /// format, which fails the build with [`SpecError::InvalidPath`].
     fn path(&self, path: &str) -> Option<Self::Path>;

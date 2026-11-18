@@ -269,6 +269,10 @@ mod tests {
     impl Parser for FixedWidth {
         type Path = Range<usize>;
 
+        fn name(&self) -> &str {
+            "fixed_width"
+        }
+
         fn path(&self, path: &str) -> Option<Range<usize>> {
             self.0
                 .iter()
@@ -300,6 +304,10 @@ mod tests {
 
     impl Parser for PanicsOnEmpty {
         type Path = ();
+
+        fn name(&self) -> &str {
+            "panics_on_empty"
+        }
 
         fn path(&self, _: &str) -> Option<()> {
             Some(())
