@@ -1,0 +1,43 @@
+schemas:
+  - name: order_line
+    version: 1
+    fields:
+      - {name: id, type: string, required: true}
+      - {name: placed_at, type: timestamp, required: true}
+      - {name: customer, type: string}
+      - {name: product, type: string}
+      - {name: quantity, type: int, required: true}
+      - {name: unit_price, type: float}
+      - {name: gift, type: bool}
+      - {name: note, type: string}
+
+parser:
+  format: delimited
+  delimiter: ","
+  fields:
+    id: "0"
+    placed_at: "1"
+    customer: "2"
+    product: "3"
+    quantity: "4"
+    unit_price: "5"
+    gift: "6"
+    note: "7"
+  empty_as_none: true
+
+mapper:
+  schema: {name: order_line, version: 1}
+  rules:
+    - target: placed_at
+      from: placed_at
+      via:
+        - timestamp:
+            formats: ["[year]-[month]-[day] [hour]:[minute]:[second]"]
+    - target: gift
+      from: gift
+      via:
+        - lookup:
+            table: {"yes": "true", "no": "false"}
+
+resp:
+  schema: {name: order_line, version: 1}

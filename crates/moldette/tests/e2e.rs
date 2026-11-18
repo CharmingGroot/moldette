@@ -1,12 +1,23 @@
 #![cfg(feature = "config")]
 
+use std::borrow::Cow;
+
 use moldette::config::{Config, Registry, Specs};
+use moldette::{Malformed, Mapped, Response, StatusCounts, Timestamp, Value};
 
 const ACCESS_LOG_YAML: &str =
     include_str!("../../moldette-config/tests/fixtures/nginx_access.yaml");
 const ACCESS_LOG_JSON: &str =
     include_str!("../../moldette-config/tests/fixtures/nginx_access.json");
+const ACCESS_LOG: &str = include_str!("../../moldette-config/tests/fixtures/nginx_access.log");
 const ORDER_BODIES: &str = include_str!("../../moldette-config/tests/fixtures/order_bodies.yaml");
+const ORDER_API_YAML: &str = include_str!("../../moldette-config/tests/fixtures/order_api.yaml");
+const ORDER_API_NDJSON: &str =
+    include_str!("../../moldette-config/tests/fixtures/order_api.ndjson");
+const ORDER_EXPORT_YAML: &str =
+    include_str!("../../moldette-config/tests/fixtures/order_export.yaml");
+const ORDER_EXPORT_CSV: &str =
+    include_str!("../../moldette-config/tests/fixtures/order_export.csv");
 
 fn specs(yaml: &str) -> Specs {
     Config::from_yaml(yaml)
@@ -15,15 +26,74 @@ fn specs(yaml: &str) -> Specs {
         .expect("specs are built")
 }
 
+fn text(value: &str) -> Value<'static> {
+    Value::Str(Cow::Owned(value.to_owned()))
+}
+
+fn ip(value: &str) -> Value<'static> {
+    Value::Ip(value.parse().expect("ip"))
+}
+
+fn timestamp(seconds: i64, nanos: u32, offset_seconds: i32) -> Value<'static> {
+    Value::Timestamp(Timestamp::new(seconds, nanos, offset_seconds).expect("timestamp"))
+}
+
+fn ok(
+    values: impl IntoIterator<Item = (&'static str, Value<'static>)>,
+    emptied: &[&'static str],
+) -> Response<'static> {
+    let mut mapped = Mapped::new();
+    for (name, value) in values {
+        mapped.insert(name, value);
+    }
+    for name in emptied {
+        mapped.mark_emptied(*name);
+    }
+    Response::Ok(mapped)
+}
+
+fn missing(fields: &[&'static str]) -> Response<'static> {
+    Response::MissingRequired(fields.iter().map(|field| Cow::Borrowed(*field)).collect())
+}
+
+fn malformed(reason: &'static str) -> Response<'static> {
+    Response::Malformed(Malformed::new(reason))
+}
+
+fn assert_responses(actual: &[Response<'_>], expected: &[Response<'_>]) {
+    assert_eq!(actual.len(), expected.len(), "record count");
+    for (record, (actual, expected)) in (1..).zip(actual.iter().zip(expected)) {
+        match (actual, expected) {
+            (Response::Malformed(actual), Response::Malformed(expected)) => assert!(
+                actual.reason().contains(expected.reason()),
+                "record {record}: {}",
+                actual.reason()
+            ),
+            _ => assert_eq!(actual, expected, "record {record}"),
+        }
+    }
+}
+
+fn counts(counts: StatusCounts) -> (u64, u64, u64, u64) {
+    (
+        counts.ok(),
+        counts.malformed(),
+        counts.missing_required(),
+        counts.emptied(),
+    )
+}
+
 mod regex {
-    use std::borrow::Cow;
     use std::sync::{Arc, RwLock};
     use std::thread;
 
     use moldette::config::{Config, Lineage, Registry, Specs};
     use moldette::{Pipeline, Response, StatusCounts, Timestamp, Value};
 
-    use crate::{ACCESS_LOG_JSON, ACCESS_LOG_YAML, specs};
+    use crate::{
+        ACCESS_LOG, ACCESS_LOG_JSON, ACCESS_LOG_YAML, assert_responses, counts, ip, malformed,
+        missing, ok, specs, text, timestamp,
+    };
 
     const OK_LINES: [&str; 2] = [
         r#"203.0.113.7 - - [18/Nov/2026:10:15:32 +0000] "GET /orders?id=A-1 HTTP/1.1" 200 512 "-" "curl/8.5.0" "198.51.100.2, 203.0.113.7""#,
@@ -47,17 +117,100 @@ mod regex {
         ]
     }
 
-    fn counts(counts: StatusCounts) -> (u64, u64, u64, u64) {
-        (
-            counts.ok(),
-            counts.malformed(),
-            counts.missing_required(),
-            counts.emptied(),
-        )
-    }
+    #[test]
+    fn processes_access_log_file_with_fallback_and_malformed_lines() {
+        let pipeline = access_log();
 
-    fn text(value: &str) -> Value<'static> {
-        Value::Str(Cow::Owned(value.to_owned()))
+        let (responses, status_counts) = pipeline.process_batch(ACCESS_LOG.lines());
+
+        assert_responses(
+            &responses,
+            &[
+                ok(
+                    [
+                        ("client", ip("198.51.100.2")),
+                        ("time", timestamp(1_794_996_932, 0, 0)),
+                        ("method", text("GET")),
+                        ("path", text("/orders")),
+                        ("http_version", text("1.1")),
+                        ("status", Value::Int(200)),
+                        ("status_class", text("success")),
+                        ("bytes", Value::Int(512)),
+                        ("user_agent", text("curl/8.5.0")),
+                        ("referer", text("-")),
+                        ("site", text("web-01")),
+                    ],
+                    &[],
+                ),
+                ok(
+                    [
+                        ("client", ip("203.0.113.8")),
+                        ("time", timestamp(1_794_996_940, 0, 0)),
+                        ("method", text("POST")),
+                        ("path", text("/orders")),
+                        ("http_version", text("2.0")),
+                        ("status", Value::Int(201)),
+                        ("status_class", text("success")),
+                        ("bytes", Value::Int(64)),
+                        ("user_agent", text("Mozilla/5.0")),
+                        ("referer", text("https://shop.example/cart")),
+                        ("site", text("web-01")),
+                    ],
+                    &[],
+                ),
+                ok(
+                    [
+                        ("client", ip("203.0.113.9")),
+                        ("time", timestamp(1_794_996_965, 0, 32_400)),
+                        ("method", text("GET")),
+                        ("path", text("/search")),
+                        ("http_version", text("1.0")),
+                        ("status", Value::Int(304)),
+                        ("status_class", text("redirection")),
+                        ("user_agent", text("Mozilla/5.0")),
+                        ("site", text("web-01")),
+                    ],
+                    &["bytes"],
+                ),
+                ok(
+                    [
+                        ("client", ip("2001:db8::1")),
+                        ("time", timestamp(1_794_996_970, 0, 0)),
+                        ("method", text("DELETE")),
+                        ("path", text("/orders/A-3")),
+                        ("http_version", text("1.1")),
+                        ("status", Value::Int(503)),
+                        ("status_class", text("server_error")),
+                        ("bytes", Value::Int(0)),
+                        ("user_agent", text("curl/8.5.0")),
+                        ("referer", text("-")),
+                        ("site", text("web-01")),
+                    ],
+                    &[],
+                ),
+                missing(&["client"]),
+                missing(&["time"]),
+                malformed("record does not match the pattern"),
+                malformed("record does not match the pattern"),
+                ok(
+                    [
+                        ("client", ip("203.0.113.13")),
+                        ("time", timestamp(1_794_997_000, 0, 0)),
+                        ("method", text("GET")),
+                        ("path", text("/health")),
+                        ("http_version", text("3")),
+                        ("status", Value::Int(200)),
+                        ("status_class", text("success")),
+                        ("bytes", Value::Int(2)),
+                        ("user_agent", text("curl/8.5.0")),
+                        ("referer", text("-")),
+                        ("site", text("web-01")),
+                    ],
+                    &[],
+                ),
+            ],
+        );
+        assert_eq!(counts(status_counts), (5, 2, 2, 0));
     }
 
     #[test]
@@ -246,9 +399,119 @@ mod regex {
 }
 
 mod delimited {
-    use moldette::Value;
+    use moldette::{Pipeline, Response, Value};
 
-    use crate::{ORDER_BODIES, specs};
+    use crate::{
+        ORDER_BODIES, ORDER_EXPORT_CSV, ORDER_EXPORT_YAML, assert_responses, counts, malformed,
+        missing, ok, specs, text, timestamp,
+    };
+
+    fn order_export(yaml: &str) -> Pipeline {
+        Pipeline::from_specs(&specs(yaml)).expect("all three sections")
+    }
+
+    const HEADER: &str = "id,placed_at,customer,product,quantity,unit_price,gift,note\n";
+
+    fn rows() -> &'static str {
+        ORDER_EXPORT_CSV
+            .strip_prefix(HEADER)
+            .expect("header row names the columns in order")
+    }
+
+    #[test]
+    fn processes_csv_rows_after_the_header_row() {
+        let pipeline = order_export(ORDER_EXPORT_YAML);
+        assert_eq!(
+            pipeline.process(HEADER),
+            missing(&["placed_at", "quantity"])
+        );
+
+        let (responses, status_counts) = pipeline.process_batch(rows().lines());
+
+        assert_responses(
+            &responses,
+            &[
+                ok(
+                    [
+                        ("id", text("A-2001")),
+                        ("placed_at", timestamp(1_794_994_200, 0, 0)),
+                        ("customer", text("C-100")),
+                        ("product", text("Notebook")),
+                        ("quantity", Value::Int(3)),
+                        ("unit_price", Value::Float(4.5)),
+                        ("gift", Value::Bool(false)),
+                    ],
+                    &[],
+                ),
+                ok(
+                    [
+                        ("id", text("A-2002")),
+                        ("placed_at", timestamp(1_794_994_275, 0, 0)),
+                        ("customer", text("C-101")),
+                        ("product", text("Desk lamp, brass")),
+                        ("quantity", Value::Int(1)),
+                        ("unit_price", Value::Float(39.9)),
+                        ("gift", Value::Bool(true)),
+                        ("note", text(r#"Leave at the "side" door"#)),
+                    ],
+                    &[],
+                ),
+                ok(
+                    [
+                        ("id", text("A-2003")),
+                        ("placed_at", timestamp(1_794_994_320, 0, 0)),
+                        ("product", text("Pencil")),
+                        ("quantity", Value::Int(12)),
+                        ("gift", Value::Bool(false)),
+                    ],
+                    &[],
+                ),
+                ok(
+                    [
+                        ("id", text("A-2004")),
+                        ("placed_at", timestamp(1_794_994_380, 0, 0)),
+                        ("customer", text("C-102")),
+                        ("product", text("Marker")),
+                        ("quantity", Value::Int(2)),
+                    ],
+                    &["unit_price", "gift"],
+                ),
+                missing(&["quantity"]),
+                missing(&["id"]),
+                missing(&["placed_at"]),
+                missing(&["quantity"]),
+                ok(
+                    [
+                        ("id", text("A-2009")),
+                        ("placed_at", timestamp(1_794_994_680, 0, 0)),
+                        ("customer", text("C-107")),
+                        ("product", text("Folder")),
+                        ("quantity", Value::Int(5)),
+                        ("unit_price", Value::Float(0.95)),
+                        ("gift", Value::Bool(true)),
+                    ],
+                    &[],
+                ),
+                malformed("quoted field is not closed"),
+                malformed("text follows a closing quote"),
+            ],
+        );
+        assert_eq!(counts(status_counts), (5, 2, 4, 0));
+    }
+
+    #[test]
+    fn strict_resp_fails_csv_rows_with_emptied_fields() {
+        let pipeline =
+            order_export(&ORDER_EXPORT_YAML.replace("resp:\n", "resp:\n  strict: true\n"));
+
+        let (responses, status_counts) = pipeline.process_batch(rows().lines());
+
+        assert_eq!(
+            responses[3],
+            Response::Emptied(vec!["unit_price".into(), "gift".into()])
+        );
+        assert_eq!(counts(status_counts), (4, 2, 4, 1));
+    }
 
     #[test]
     fn maps_coalesce_candidates_read_from_nested_bodies() {
@@ -264,46 +527,81 @@ mod delimited {
 }
 
 mod json {
-    use moldette::{Pipeline, Response, Value};
+    use moldette::{Pipeline, Value};
 
-    use crate::specs;
-
-    const ORDERS: &str = r#"schemas:
-  - name: order
-    version: 1
-    fields:
-      - {name: id, type: string, required: true}
-      - {name: amount, type: float}
-      - {name: paid, type: bool}
-parser:
-  format: json
-  fields: {id: /order/id, amount: /order/amount, paid: /order/paid}
-mapper:
-  schema: {name: order, version: 1}
-resp:
-  schema: {name: order, version: 1}
-"#;
+    use crate::{
+        ORDER_API_NDJSON, ORDER_API_YAML, assert_responses, counts, malformed, missing, ok, specs,
+        text, timestamp,
+    };
 
     #[test]
-    fn processes_order_records() {
-        let pipeline = Pipeline::from_specs(&specs(ORDERS)).expect("all three sections");
+    fn processes_api_responses_one_record_per_line() {
+        let pipeline = Pipeline::from_specs(&specs(ORDER_API_YAML)).expect("all three sections");
 
-        let Response::Ok(mapped) =
-            pipeline.process(r#"{"order": {"id": "A-1", "amount": 12.50, "paid": true}}"#)
-        else {
-            panic!("record is ok");
-        };
-        assert_eq!(mapped.get("id"), Some(&Value::Str("A-1".into())));
-        assert_eq!(mapped.get("amount"), Some(&Value::Float(12.5)));
-        assert_eq!(mapped.get("paid"), Some(&Value::Bool(true)));
-        assert_eq!(
-            pipeline.process(r#"{"order": {"amount": 3}}"#),
-            Response::MissingRequired(vec!["id".into()])
+        let (responses, status_counts) = pipeline.process_batch(ORDER_API_NDJSON.lines());
+
+        assert_responses(
+            &responses,
+            &[
+                ok(
+                    [
+                        ("id", text("A-1001")),
+                        ("status", text("paid")),
+                        ("customer", text("C-100")),
+                        ("city", text("Springfield")),
+                        ("first_sku", text("S-1")),
+                        ("first_quantity", Value::Int(2)),
+                        ("total", Value::Float(25.5)),
+                        ("paid", Value::Bool(true)),
+                        ("created_at", timestamp(1_794_994_200, 0, 0)),
+                        ("coupon", text("WELCOME")),
+                    ],
+                    &[],
+                ),
+                ok(
+                    [
+                        ("id", text("A-1002")),
+                        ("status", text("on hold")),
+                        ("customer", text("C-101")),
+                        ("first_sku", text("S-3")),
+                        ("first_quantity", Value::Int(1)),
+                        ("total", Value::Float(40.0)),
+                        ("paid", Value::Bool(false)),
+                        ("created_at", timestamp(1_794_995_110, 0, 32_400)),
+                    ],
+                    &[],
+                ),
+                ok(
+                    [
+                        ("id", text("A-1003")),
+                        ("status", text("pending")),
+                        ("customer", text("C-102")),
+                        ("total", Value::Float(12.5)),
+                        ("paid", Value::Bool(false)),
+                        ("created_at", timestamp(1_794_996_000, 250_000_000, 0)),
+                        ("coupon", text("")),
+                    ],
+                    &[],
+                ),
+                ok(
+                    [
+                        ("id", text("A-1004")),
+                        ("status", text("paid")),
+                        ("customer", text("C-103")),
+                        ("first_sku", text("S-4")),
+                        ("total", Value::Float(9.99)),
+                        ("created_at", timestamp(1_794_999_600, 0, 0)),
+                    ],
+                    &["first_quantity", "paid"],
+                ),
+                missing(&["total"]),
+                missing(&["id", "created_at"]),
+                malformed("EOF while parsing"),
+                malformed("expected a JSON object"),
+                malformed("trailing characters"),
+            ],
         );
-        assert!(matches!(
-            pipeline.process(r#"[{"order": {}}]"#),
-            Response::Malformed(_)
-        ));
+        assert_eq!(counts(status_counts), (4, 3, 2, 0));
     }
 }
 

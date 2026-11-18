@@ -1,0 +1,12 @@
+id,placed_at,customer,product,quantity,unit_price,gift,note
+A-2001,2026-11-18 09:30:00,C-100,Notebook,3,4.50,no,
+A-2002,2026-11-18 09:31:15,C-101,"Desk lamp, brass",1,39.90,yes,"Leave at the ""side"" door"
+A-2003,2026-11-18 09:32:00,"",Pencil,12,,no,
+A-2004,2026-11-18 09:33:00,C-102,Marker,2,"1,50",maybe,
+A-2005,2026-11-18 09:34:00,C-103,Stapler,two,7.25,no,
+,2026-11-18 09:35:00,C-104,Ruler,1,1.20,no,
+A-2007,18/11/2026 09:36,C-105,Eraser,2,0.80,no,
+A-2008,2026-11-18 09:37:00,C-106
+A-2009,2026-11-18 09:38:00,C-107,Folder,5,0.95,yes,,archived
+A-2010,2026-11-18 09:39:00,C-108,"Tape, clear,1,2.10,no,
+A-2011,2026-11-18 09:40:00,C-109,"Glue" stick,1,3.00,no,
