@@ -3,8 +3,14 @@
 //!
 //! It takes only `moldette-core` types, so it can check records produced by
 //! any tool (#3).
+//!
+//! With the `tracing` feature, each batch runs in an `INFO` span
+//! `moldette.resp.respond_batch` that carries the response count per status.
+//! Its duration includes reading the input records. Signals never carry record
+//! values (#7).
 
 mod spec;
+mod telemetry;
 
 pub use spec::{RespSpec, RespSpecBuilder};
 

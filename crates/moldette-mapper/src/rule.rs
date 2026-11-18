@@ -5,6 +5,7 @@ use moldette_core::{Field, FieldRecord, Mapped, SpecError, Type, Value};
 use crate::coerce::coerce;
 use crate::op::{CompiledOp, CustomOp, DeclaredOp, Op, invalid_argument};
 use crate::recorder::Recorder;
+use crate::telemetry;
 
 /// Where one output field takes its value from, and the ops applied to it.
 ///
@@ -172,7 +173,10 @@ impl CompiledRule {
         }
         match value {
             Some(value) => mapped.insert(field.name(), value),
-            None if found => mapped.mark_emptied(field.name()),
+            None if found => {
+                telemetry::emptied(field.name());
+                mapped.mark_emptied(field.name());
+            }
             None => {}
         }
     }

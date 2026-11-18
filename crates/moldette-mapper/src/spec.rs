@@ -3,6 +3,7 @@ use moldette_core::{Explain, FieldRecord, Mapped, OutputSchema, SpecError};
 use crate::Rule;
 use crate::recorder::{Discard, ExplainRecorder, Recorder};
 use crate::rule::CompiledRule;
+use crate::telemetry;
 
 /// Rules for every field of an output schema, validated and immutable.
 ///
@@ -44,11 +45,13 @@ impl MapperSpec {
         record: &FieldRecord<'a>,
         recorder: &mut R,
     ) -> Mapped<'a> {
-        let mut mapped = Mapped::new();
-        for (field, rule) in self.schema.fields().iter().zip(&self.rules) {
-            rule.run(field, record, &mut mapped, recorder);
-        }
-        mapped
+        telemetry::map_span(&self.schema).in_scope(|| {
+            let mut mapped = Mapped::new();
+            for (field, rule) in self.schema.fields().iter().zip(&self.rules) {
+                rule.run(field, record, &mut mapped, recorder);
+            }
+            mapped
+        })
     }
 }
 
@@ -66,6 +69,11 @@ impl MapperSpecBuilder {
     /// Fails when a rule targets a field missing from the schema or a field
     /// that already has a rule, or when an op argument is not valid.
     pub fn build(self) -> Result<MapperSpec, SpecError> {
+        let span = telemetry::build_span(&self.schema, self.rules.len());
+        span.in_scope(|| self.compile().inspect_err(telemetry::spec_error))
+    }
+
+    fn compile(self) -> Result<MapperSpec, SpecError> {
         for (i, rule) in self.rules.iter().enumerate() {
             if self.schema.field(&rule.target).is_none() {
                 return Err(SpecError::UnknownField(rule.target.clone()));

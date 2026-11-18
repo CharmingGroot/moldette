@@ -10,3 +10,10 @@ publish = false
 
 [dependencies]
 moldette-core = { path = "../moldette-core" }
+tracing = { workspace = true, optional = true }
+
+[dev-dependencies]
+tracing = { workspace = true, features = ["std"] }
+
+[features]
+tracing = ["dep:tracing"]
