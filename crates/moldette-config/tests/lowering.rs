@@ -94,6 +94,7 @@ mod lower {
         mod spec {
             use moldette_config::Registry;
             use moldette_core::SpecError;
+            use moldette_parser::{Format, ParserSpec};
 
             use crate::common::{build_error, build_yaml, invalid_argument, location, spec};
 
@@ -159,26 +160,31 @@ parser:
                     &Registry::new(),
                 )
                 .expect("specs are built");
-                let record = specs
-                    .parser()
-                    .expect("parser spec")
-                    .parse(r#"2026-11-18T10:00:00Z shop[42]: {"order_id":"A-1","items":"B-7;C-3"}"#)
-                    .expect("record is parsed");
-                let fields: Vec<_> = record.iter().collect();
-                assert_eq!(
-                    fields,
-                    [
-                        ("time", "2026-11-18T10:00:00Z"),
-                        ("app", "shop"),
-                        ("order_id", "A-1"),
-                        ("first_item", "B-7")
-                    ]
-                );
+                let items = ParserSpec::builder(Format::Delimited { delimiter: ';' })
+                    .field("first_item", "0")
+                    .build()
+                    .expect("valid spec");
+                let order = ParserSpec::builder(Format::Json)
+                    .field("order_id", "/order_id")
+                    .body("/items", items)
+                    .build()
+                    .expect("valid spec");
+                let expected = ParserSpec::builder(Format::Regex {
+                    pattern: r"^(?P<time>\S+) (?P<app>[^\[]+)\[(?P<pid>\d+)\]:(?: (?P<body>.*))?$"
+                        .into(),
+                })
+                .field("time", "time")
+                .field("app", "app")
+                .body("body", order)
+                .build()
+                .expect("valid spec");
+                assert_eq!(specs.parser(), Some(&expected));
             }
         }
 
         mod kv {
             use moldette_config::Registry;
+            use moldette_parser::{Format, ParserSpec};
 
             use crate::common::build_yaml;
 
@@ -189,12 +195,14 @@ parser:
                     &Registry::new(),
                 )
                 .expect("specs are built");
-                let record = specs
-                    .parser()
-                    .expect("parser spec")
-                    .parse("id=A-1 amount=12.50")
-                    .expect("record is parsed");
-                assert_eq!(record.get("id"), Some("A-1"));
+                let expected = ParserSpec::builder(Format::Kv {
+                    pair_delimiter: ' ',
+                    key_value_delimiter: '=',
+                })
+                .field("id", "id")
+                .build()
+                .expect("valid spec");
+                assert_eq!(specs.parser(), Some(&expected));
                 assert!(specs.schemas().is_empty());
                 assert!(specs.mapper().is_none() && specs.resp().is_none());
             }

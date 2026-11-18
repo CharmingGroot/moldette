@@ -67,10 +67,13 @@ impl Format {
 
 /// A validated description of how to parse raw records. Immutable once
 /// built.
+///
+/// Two specs are equal when they are built from equal formats, fields, bodies
+/// and `empty_as_none` settings, so a custom format must share its parser.
 #[derive(Debug, Clone)]
 pub struct ParserSpec {
     format: Format,
-    names: Vec<String>,
+    fields: Vec<(String, String)>,
     paths: Paths,
     bodies: Vec<Body>,
     field_count: usize,
@@ -86,7 +89,7 @@ enum Paths {
     Custom(CustomPaths),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct Body {
     path: String,
     spec: ParserSpec,
@@ -123,7 +126,7 @@ impl ParserSpec {
             .inspect_err(|_| telemetry::malformed(|| self.format.name()))?
             .into_iter()
             .map(|value| value.filter(|value| !(self.empty_as_none && value.is_empty())));
-        for (name, value) in self.names.iter().zip(values.by_ref()) {
+        for ((name, _), value) in self.fields.iter().zip(values.by_ref()) {
             if let Some(value) = value {
                 sink(name, value);
             }
@@ -143,12 +146,23 @@ impl ParserSpec {
     }
 
     fn collect_names<'s>(&'s self, names: &mut Vec<&'s str>) {
-        names.extend(self.names.iter().map(String::as_str));
+        names.extend(self.fields.iter().map(|(name, _)| name.as_str()));
         for body in &self.bodies {
             body.spec.collect_names(names);
         }
     }
 }
+
+impl PartialEq for ParserSpec {
+    fn eq(&self, other: &Self) -> bool {
+        self.format == other.format
+            && self.fields == other.fields
+            && self.bodies == other.bodies
+            && self.empty_as_none == other.empty_as_none
+    }
+}
+
+impl Eq for ParserSpec {}
 
 impl Paths {
     fn new(format: Format, paths: &[String]) -> Result<Self, SpecError> {
@@ -224,10 +238,15 @@ impl ParserSpecBuilder {
         }
         validate_field_names(names.iter().copied())?;
         let field_count = names.len();
-        let (names, mut paths): (_, Vec<String>) = self.fields.into_iter().unzip();
-        paths.extend(self.bodies.iter().map(|(path, _)| path.clone()));
+        let paths: Vec<String> = self
+            .fields
+            .iter()
+            .map(|(_, path)| path)
+            .chain(self.bodies.iter().map(|(path, _)| path))
+            .cloned()
+            .collect();
         Ok(ParserSpec {
-            names,
+            fields: self.fields,
             paths: Paths::new(self.format.clone(), &paths)?,
             format: self.format,
             bodies: self
@@ -1399,6 +1418,123 @@ mod tests {
         let format = Format::custom(ORDER_LAYOUT);
         assert_eq!(format.clone(), format);
         assert_ne!(Format::custom(ORDER_LAYOUT), format);
+    }
+
+    fn app_line_spec(header: Format, body: ParserSpec) -> ParserSpecBuilder {
+        ParserSpec::builder(header)
+            .field("time", "time")
+            .field("app", "app")
+            .body("body", body)
+    }
+
+    fn order_body() -> ParserSpec {
+        ParserSpec::builder(Format::Json)
+            .field("order_id", "/order_id")
+            .body("/items", spec(CSV, &[("first_item", "0")]))
+            .build()
+            .expect("valid spec")
+    }
+
+    #[test]
+    fn specs_built_by_the_same_calls_are_equal() {
+        let build = || {
+            app_line_spec(regex(APP_HEADER), order_body())
+                .empty_as_none()
+                .build()
+                .expect("valid spec")
+        };
+        assert_eq!(build(), build());
+        assert_eq!(build().clone(), build());
+        let kv = || spec(LOGFMT, &[("order_id", "order_id"), ("amount", "amount")]);
+        assert_eq!(kv(), kv());
+    }
+
+    #[test]
+    fn specs_differ_in_any_declared_input() {
+        let base = spec(CSV, &[("order_id", "0"), ("amount", "1")]);
+        let others = [
+            spec(
+                Format::Delimited { delimiter: ';' },
+                &[("order_id", "0"), ("amount", "1")],
+            ),
+            spec(CSV, &[("amount", "1"), ("order_id", "0")]),
+            spec(CSV, &[("order_id", "0"), ("total", "1")]),
+            spec(CSV, &[("order_id", "0"), ("amount", "2")]),
+            spec(CSV, &[("order_id", "0")]),
+            ParserSpec::builder(CSV)
+                .field("order_id", "0")
+                .field("amount", "1")
+                .empty_as_none()
+                .build()
+                .expect("valid spec"),
+            ParserSpec::builder(CSV)
+                .field("order_id", "0")
+                .body("1", spec(Format::Json, &[("amount", "/amount")]))
+                .build()
+                .expect("valid spec"),
+        ];
+        for other in &others {
+            assert_ne!(&base, other);
+        }
+    }
+
+    #[test]
+    fn regex_specs_compare_patterns_as_written() {
+        let digits = spec(regex(r"^(?P<id>\d+)$"), &[("id", "id")]);
+        let range = spec(regex(r"^(?P<id>[0-9]+)$"), &[("id", "id")]);
+        assert_eq!(digits, spec(regex(r"^(?P<id>\d+)$"), &[("id", "id")]));
+        assert_ne!(digits, range);
+    }
+
+    #[test]
+    fn bodies_are_compared_recursively() {
+        let base = app_line_spec(regex(APP_HEADER), order_body())
+            .build()
+            .expect("valid spec");
+        let other_body_path = ParserSpec::builder(regex(APP_HEADER))
+            .field("time", "time")
+            .field("app", "app")
+            .body("pid", order_body())
+            .build()
+            .expect("valid spec");
+        let nested_empty_as_none = ParserSpec::builder(Format::Json)
+            .field("order_id", "/order_id")
+            .body(
+                "/items",
+                ParserSpec::builder(CSV)
+                    .field("first_item", "0")
+                    .empty_as_none()
+                    .build()
+                    .expect("valid spec"),
+            )
+            .build()
+            .expect("valid spec");
+        let other_nested = app_line_spec(regex(APP_HEADER), nested_empty_as_none)
+            .build()
+            .expect("valid spec");
+        assert_ne!(base, other_body_path);
+        assert_ne!(base, other_nested);
+    }
+
+    #[test]
+    fn custom_specs_are_equal_only_when_they_share_the_parser() {
+        let format = Format::custom(ORDER_LAYOUT);
+        let fields = [("order_id", "order_id"), ("status", "status")];
+        assert_eq!(spec(format.clone(), &fields), spec(format.clone(), &fields));
+        assert_ne!(
+            spec(format.clone(), &fields),
+            spec(Format::custom(ORDER_LAYOUT), &fields)
+        );
+        let header = |body: Format| {
+            app_line_spec(regex(APP_HEADER), spec(body, &fields))
+                .build()
+                .expect("valid spec")
+        };
+        assert_eq!(header(format.clone()), header(format));
+        assert_ne!(
+            header(Format::custom(ORDER_LAYOUT)),
+            header(Format::custom(ORDER_LAYOUT))
+        );
     }
 
     #[test]
