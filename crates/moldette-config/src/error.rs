@@ -2,7 +2,8 @@ use std::fmt;
 
 use moldette_core::SpecError;
 
-use crate::check::DiagnosticKind;
+use crate::diagnostic::{Diagnostic, DiagnosticKind};
+use crate::position::{Position, write_located};
 
 /// An error found while reading a configuration, with the key path and, when
 /// the reader reports one, the position of the offending node.
@@ -20,6 +21,14 @@ impl LoadError {
             path,
             position,
         }
+    }
+
+    pub(crate) fn from_diagnostic(diagnostic: &Diagnostic) -> Self {
+        Self::new(
+            LoadErrorKind::Diagnostic(diagnostic.kind().clone()),
+            diagnostic.path().to_owned(),
+            diagnostic.position(),
+        )
     }
 
     pub fn kind(&self) -> &LoadErrorKind {
@@ -42,22 +51,6 @@ impl fmt::Display for LoadError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write_located(f, &self.path, &self.kind, self.position)
     }
-}
-
-pub(crate) fn write_located(
-    f: &mut fmt::Formatter<'_>,
-    path: &str,
-    message: &dyn fmt::Display,
-    position: Option<Position>,
-) -> fmt::Result {
-    if !path.is_empty() {
-        write!(f, "{path}: ")?;
-    }
-    write!(f, "{message}")?;
-    if let Some(position) = position {
-        write!(f, " at line {}, column {}", position.line, position.column)?;
-    }
-    Ok(())
 }
 
 impl std::error::Error for LoadError {}
@@ -178,26 +171,5 @@ impl fmt::Display for ValueKind {
             Self::Character => "a single character",
             Self::Op => "an op name or a map with one op name",
         })
-    }
-}
-
-/// A one-based line and column in the configuration text.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Position {
-    line: usize,
-    column: usize,
-}
-
-impl Position {
-    pub(crate) fn new(line: usize, column: usize) -> Self {
-        Self { line, column }
-    }
-
-    pub fn line(&self) -> usize {
-        self.line
-    }
-
-    pub fn column(&self) -> usize {
-        self.column
     }
 }

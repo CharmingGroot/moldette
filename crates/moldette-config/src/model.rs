@@ -1,9 +1,10 @@
 use moldette_core::Type;
 
 use crate::arguments::Arguments;
-use crate::decode::{Cursor, MapReader};
-use crate::error::{LoadError, LoadErrorKind, Position, ValueKind};
+use crate::cursor::{Cursor, MapReader};
+use crate::error::{LoadError, LoadErrorKind, ValueKind};
 use crate::node::{Node, NodeValue, Scalar, key_path, reject_duplicate_keys};
+use crate::position::Position;
 use crate::{json, yaml};
 
 /// A configuration file read into its sections. Keys follow the names of the
@@ -291,7 +292,8 @@ fn parser(map: &MapReader<'_>, extra_keys: &[&str]) -> Result<ParserSection, Loa
     let name = format.string()?;
     let Some(format_keys) = built_in_keys(&BUILT_IN_FORMATS, &name) else {
         let format = FormatEntry::Custom {
-            arguments: map.arguments(
+            arguments: Arguments::from_map(
+                map,
                 &[&PARSER_KEYS[..], extra_keys].concat(),
                 format.node.position,
             ),
@@ -440,7 +442,7 @@ fn op_with_arguments(name: &str, cursor: Cursor<'_>) -> Result<OpEntry, LoadErro
     let Some(keys) = built_in_keys(&BUILT_IN_OPS, name) else {
         return Ok(OpEntry::Custom {
             name: name.to_owned(),
-            arguments: map.arguments(&[], position),
+            arguments: Arguments::from_map(&map, &[], position),
         });
     };
     map.allow(keys)?;

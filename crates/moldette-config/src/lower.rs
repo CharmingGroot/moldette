@@ -3,9 +3,10 @@ use moldette_mapper::{MapperSpec, Rule};
 use moldette_parser::{Format, ParserSpec};
 use moldette_resp::RespSpec;
 
-use crate::check::Report;
+use crate::diagnostic::Report;
 use crate::digest::digest;
-use crate::error::{LoadError, LoadErrorKind, Position};
+use crate::error::{LoadError, LoadErrorKind};
+use crate::fields::{body_path, parser_field_names};
 use crate::lineage::{Lineage, lineage};
 use crate::model::{
     Config, FieldEntry, FormatEntry, MapperSection, OpEntry, ParserSection, RespSection, RuleEntry,
@@ -91,7 +92,7 @@ impl Config {
             .transpose()?;
         let report = self.check();
         if let Some(error) = report.first_error() {
-            return Err(error.to_load_error());
+            return Err(LoadError::from_diagnostic(error));
         }
         Ok(Specs {
             digest: digest(self),
@@ -239,10 +240,6 @@ fn parser_spec(
     })
 }
 
-fn body_path(path: &str, index: usize) -> String {
-    index_path(&key_path(path, "bodies"), index)
-}
-
 fn parser_error_path(section: &ParserSection, path: &str, err: &SpecError) -> String {
     let located = match err {
         SpecError::InvalidPath(invalid) => section
@@ -266,29 +263,6 @@ fn parser_error_path(section: &ParserSection, path: &str, err: &SpecError) -> St
         ),
     };
     located.unwrap_or_else(|| path.to_owned())
-}
-
-pub(crate) fn parser_field_names<'s>(
-    section: &'s ParserSection,
-    path: &str,
-) -> Vec<(&'s str, String, Option<Position>)> {
-    let fields_path = key_path(path, "fields");
-    let mut names: Vec<_> = section
-        .fields
-        .iter()
-        .enumerate()
-        .map(|(i, (name, _))| {
-            (
-                name.as_str(),
-                key_path(&fields_path, name),
-                section.field_positions.get(i).copied().flatten(),
-            )
-        })
-        .collect();
-    for (i, body) in section.bodies.iter().enumerate() {
-        names.extend(parser_field_names(&body.parser, &body_path(path, i)));
-    }
-    names
 }
 
 fn mapper_spec(

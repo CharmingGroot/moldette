@@ -1,8 +1,9 @@
 use moldette_core::SpecError;
 
-use crate::decode::Cursor;
-use crate::error::{LoadError, LoadErrorKind, Position};
+use crate::cursor::{Cursor, MapReader};
+use crate::error::{LoadError, LoadErrorKind};
 use crate::node::{Key, Node, key_path};
+use crate::position::Position;
 
 /// The argument map of a caller-defined op or format, read by its
 /// [`Registry`](crate::Registry) constructor. Keys the constructor leaves
@@ -30,6 +31,22 @@ impl Arguments {
             position,
             read,
         }
+    }
+
+    pub(crate) fn from_map(
+        map: &MapReader<'_>,
+        excluded: &[&str],
+        position: Option<Position>,
+    ) -> Self {
+        Self::new(
+            map.entries
+                .iter()
+                .filter(|(key, _)| !excluded.contains(&key.text.as_str()))
+                .cloned()
+                .collect(),
+            map.cursor.path.clone(),
+            position,
+        )
     }
 
     pub fn is_empty(&self) -> bool {

@@ -2,8 +2,9 @@ use std::fmt;
 
 use serde::de::{Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
 
-use crate::error::{LoadError, LoadErrorKind, Position};
+use crate::error::{LoadError, LoadErrorKind};
 use crate::node::{Key, Node, NodeValue, Scalar};
+use crate::position::Position;
 
 pub(crate) fn read(text: &str) -> Result<Node, LoadError> {
     let mut deserializer = serde_json::Deserializer::from_str(text);
