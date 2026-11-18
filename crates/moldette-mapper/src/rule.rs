@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use moldette_core::{FieldRecord, SpecError};
 
-use crate::op::{CompiledOp, DeclaredOp, invalid_argument};
+use crate::op::{CompiledOp, CustomOp, DeclaredOp, Op, invalid_argument};
 
 /// Where one output field takes its value from, and the ops applied to it.
 ///
@@ -65,20 +65,20 @@ impl Rule {
 
     /// Removes leading and trailing whitespace.
     pub fn trim(self) -> Self {
-        self.via(DeclaredOp::Trim)
+        self.push(DeclaredOp::Trim)
     }
 
     /// Splits the text on `separator` and keeps the part at the zero-based
     /// `index`.
     pub fn split(self, separator: char, index: usize) -> Self {
-        self.via(DeclaredOp::Split { separator, index })
+        self.push(DeclaredOp::Split { separator, index })
     }
 
     /// Keeps the text matched by the capture group of `pattern`. The build
     /// fails unless `pattern` is a valid regular expression with exactly one
     /// capture group.
     pub fn extract(self, pattern: impl Into<String>) -> Self {
-        self.via(DeclaredOp::Extract(pattern.into()))
+        self.push(DeclaredOp::Extract(pattern.into()))
     }
 
     /// Replaces the text with its value in `table`. The first entry wins when
@@ -91,7 +91,7 @@ impl Rule {
             .into_iter()
             .map(|(key, value)| (key.into(), value.into()))
             .collect();
-        self.via(DeclaredOp::Lookup(table))
+        self.push(DeclaredOp::Lookup(table))
     }
 
     /// Reads the text with the first of `formats` that matches it and writes
@@ -100,15 +100,21 @@ impl Rule {
     /// build fails when `formats` is empty or a format is not valid.
     pub fn timestamp(self, formats: impl IntoIterator<Item = impl Into<String>>) -> Self {
         let formats = formats.into_iter().map(Into::into).collect();
-        self.via(DeclaredOp::Timestamp(formats))
+        self.push(DeclaredOp::Timestamp(formats))
     }
 
     /// Treats an empty text as absent.
     pub fn empty_as_none(self) -> Self {
-        self.via(DeclaredOp::EmptyAsNone)
+        self.push(DeclaredOp::EmptyAsNone)
     }
 
-    fn via(mut self, op: DeclaredOp) -> Self {
+    /// Applies a caller-defined op. A clone of the rule shares the op, and two
+    /// rules are equal only when they share each of their custom ops.
+    pub fn via(self, op: impl Op + 'static) -> Self {
+        self.push(DeclaredOp::Custom(CustomOp::new(op)))
+    }
+
+    fn push(mut self, op: DeclaredOp) -> Self {
         self.via.push(op);
         self
     }
