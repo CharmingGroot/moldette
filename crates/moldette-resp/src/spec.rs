@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use moldette_core::{Mapped, OutputSchema, Response};
+use moldette_core::{Mapped, OutputSchema, Response, StatusCounts};
 
 /// Turns [`Mapped`] records into a [`Response`] for one output schema.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,6 +42,20 @@ impl RespSpec {
             }
         }
         Response::Ok(mapped)
+    }
+
+    /// Responds to each record in input order, as [`respond`](Self::respond)
+    /// does, and counts the responses per status.
+    pub fn respond_batch<'a, I>(&'a self, records: I) -> (Vec<Response<'a>>, StatusCounts)
+    where
+        I: IntoIterator<Item = Mapped<'a>>,
+    {
+        let responses: Vec<Response<'a>> = records
+            .into_iter()
+            .map(|mapped| self.respond(mapped))
+            .collect();
+        let counts = responses.iter().collect();
+        (responses, counts)
     }
 
     fn emptied_fields<'a>(&'a self, mapped: &Mapped<'a>) -> Vec<Cow<'a, str>> {
@@ -192,6 +206,51 @@ mod tests {
     }
 
     #[test]
+    fn batch_keeps_input_order_and_counts_each_status() {
+        let mut emptied_status = complete_order();
+        emptied_status.mark_emptied("status");
+        let mut missing_amount = Mapped::new();
+        missing_amount.insert("order_id", Value::Str("A-2".into()));
+        missing_amount.insert("ordered_at", ordered_at());
+        let records = vec![
+            complete_order(),
+            emptied_status,
+            missing_amount,
+            complete_order(),
+        ];
+        let spec = order_builder().strict().build();
+
+        let (responses, counts) = spec.respond_batch(records);
+
+        assert_eq!(
+            responses,
+            [
+                Response::Ok(complete_order()),
+                Response::Emptied(vec!["status".into()]),
+                Response::MissingRequired(vec!["amount".into()]),
+                Response::Ok(complete_order()),
+            ]
+        );
+        assert_eq!(
+            (
+                counts.ok(),
+                counts.malformed(),
+                counts.missing_required(),
+                counts.emptied()
+            ),
+            (2, 0, 1, 1)
+        );
+    }
+
+    #[test]
+    fn batch_of_no_records_is_empty() {
+        let spec = order_builder().build();
+        let (responses, counts) = spec.respond_batch(Vec::new());
+        assert!(responses.is_empty());
+        assert_eq!(counts, StatusCounts::default());
+    }
+
+    #[test]
     fn shared_spec_matches_single_threaded_responses() {
         let records: Vec<Mapped<'static>> = (0..64)
             .map(|i| {
@@ -217,17 +276,12 @@ mod tests {
                 .iter()
                 .map(|mapped| spec.respond(mapped.clone()))
                 .collect();
+            let counts: StatusCounts = expected.iter().collect();
+            let expected = (expected, counts);
 
             thread::scope(|scope| {
                 let handles: Vec<_> = (0..4)
-                    .map(|_| {
-                        scope.spawn(|| {
-                            records
-                                .iter()
-                                .map(|mapped| spec.respond(mapped.clone()))
-                                .collect::<Vec<_>>()
-                        })
-                    })
+                    .map(|_| scope.spawn(|| spec.respond_batch(records.iter().cloned())))
                     .collect();
                 for handle in handles {
                     assert_eq!(handle.join().expect("thread completes"), expected);

@@ -67,7 +67,7 @@ moldette            pipeline facade, layers selected by feature
 |---|---|
 | parser | `json`, `delimited`, `regex`, `kv`, header + body composition |
 | mapper | rule keys `target`, `from`, `via`, `fallback`, `required` (#14); ops `trim`, `split`/`at`, `extract`, `lookup`, `const`, `coalesce`, `timestamp`; implicit coercion to string, int, float, bool, timestamp, ip |
-| resp | statuses `Ok`, `Malformed`, `MissingRequired`; emptied-field list (#5); `explain` (#6); strict mode |
+| resp | statuses `Ok`, `Malformed`, `MissingRequired`, `Emptied` (strict mode, #5); `explain` (#6); strict mode |
 
 Custom parsers and ops are registered as Rust types. Configuration has no
 expression language (#4).
@@ -125,7 +125,7 @@ use core types only.
 3. emptied-field report, strict mode
 4. `explain`, spec version
 5. batch API
-6. per-status counts and durations
+6. per-status counts; durations from `tracing` spans (#7)
 7. standalone tests
 
 ### M4 configuration
