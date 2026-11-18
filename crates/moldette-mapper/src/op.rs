@@ -17,11 +17,16 @@ use time::{OffsetDateTime, PrimitiveDateTime};
 ///
 /// An op is a pure function of its text: it returns `None` for text it cannot
 /// handle (#5) and does not panic. A panic is not caught and reaches the
-/// caller of [`MapperSpec::map`](crate::MapperSpec::map) (#15).
+/// caller of [`MapperSpec::map`](crate::MapperSpec::map) or
+/// [`MapperSpec::explain`](crate::MapperSpec::explain) (#15).
 pub trait Op: fmt::Debug + Send + Sync + RefUnwindSafe {
     /// Returns the converted text, borrowed from `text` or from the op where
     /// possible, or `None` when the op cannot handle `text`.
     fn apply<'a>(&'a self, text: &'a str) -> Option<Cow<'a, str>>;
+
+    /// The name recorded for the op by
+    /// [`MapperSpec::explain`](crate::MapperSpec::explain).
+    fn name(&self) -> &str;
 }
 
 #[derive(Debug, Clone)]
@@ -40,6 +45,10 @@ impl CustomOp {
                 .apply(&text)
                 .map(|converted| Cow::Owned(converted.into_owned())),
         }
+    }
+
+    fn name(&self) -> &str {
+        self.0.name()
     }
 }
 
@@ -120,6 +129,18 @@ pub(crate) fn invalid_argument(name: &str, value: &str) -> SpecError {
 }
 
 impl CompiledOp {
+    pub(crate) fn name(&self) -> &str {
+        match self {
+            Self::Trim => "trim",
+            Self::Split { .. } => "split",
+            Self::Extract(_) => "extract",
+            Self::Lookup(_) => "lookup",
+            Self::Timestamp(_) => "timestamp",
+            Self::EmptyAsNone => "empty_as_none",
+            Self::Custom(op) => op.name(),
+        }
+    }
+
     pub(crate) fn apply<'a>(&'a self, text: Cow<'a, str>) -> Option<Cow<'a, str>> {
         match self {
             Self::Trim => substring(text, |text| Some(text.trim())),
