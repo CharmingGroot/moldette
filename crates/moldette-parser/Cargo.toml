@@ -1,0 +1,14 @@
+[package]
+name = "moldette-parser"
+version = "0.0.0"
+description = "Parses one raw record into named text fields"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+# Kept unpublished until the first public release (#10).
+publish = false
+
+[dependencies]
+moldette-core = { path = "../moldette-core" }
+serde = "1.0.229"
+serde_json = { version = "1.0.154", features = ["raw_value"] }
