@@ -20,7 +20,7 @@ pub use error::SpecError;
 pub use mapped::Mapped;
 pub use names::validate_field_names;
 pub use record::FieldRecord;
-pub use response::{Malformed, Response};
+pub use response::{Malformed, Response, StatusCounts};
 pub use schema::{Field, OutputSchema, OutputSchemaBuilder, Type};
 pub use timestamp::Timestamp;
 pub use value::Value;
@@ -37,6 +37,7 @@ mod tests {
         assert_send_sync::<FieldRecord<'_>>();
         assert_send_sync::<Mapped<'_>>();
         assert_send_sync::<Response<'_>>();
+        assert_send_sync::<StatusCounts>();
         assert_send_sync::<OutputSchema>();
         assert_send_sync::<SpecError>();
     }
