@@ -1,4 +1,4 @@
-use moldette_core::{FieldRecord, Malformed, SpecError};
+use moldette_core::{FieldRecord, Malformed, SpecError, validate_field_names};
 
 use crate::json::{self, JsonPaths};
 
@@ -68,14 +68,7 @@ impl ParserSpecBuilder {
     }
 
     pub fn build(self) -> Result<ParserSpec, SpecError> {
-        for (i, (name, _)) in self.fields.iter().enumerate() {
-            if name.is_empty() {
-                return Err(SpecError::EmptyFieldName);
-            }
-            if self.fields[..i].iter().any(|(n, _)| n == name) {
-                return Err(SpecError::DuplicateField(name.clone()));
-            }
-        }
+        validate_field_names(self.fields.iter().map(|(name, _)| name.as_str()))?;
         let (names, paths): (_, Vec<String>) = self.fields.into_iter().unzip();
         let paths = match self.format {
             Format::Json => JsonPaths::new(&paths)?,
