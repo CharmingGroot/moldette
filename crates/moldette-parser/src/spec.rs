@@ -4,9 +4,10 @@ use moldette_core::{FieldRecord, Malformed, SpecError, validate_field_names};
 
 use crate::delimited::DelimitedColumns;
 use crate::json::{self, JsonPaths};
+use crate::regex::RegexGroups;
 
 /// The format of the raw records a spec parses.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Format {
     /// One JSON object per record. A field path is a JSON Pointer (RFC 6901),
@@ -19,6 +20,13 @@ pub enum Format {
     /// for one quote. A trailing line break is ignored. The delimiter cannot
     /// be `"`, `\n` or `\r`.
     Delimited { delimiter: char },
+    /// One record searched with `pattern` in the syntax of the `regex` crate.
+    /// A field path is the name of a capture group, and a group that takes
+    /// no part in the match leaves its field absent. The pattern may match
+    /// anywhere, so `^` and `$` are needed to match the whole record. A
+    /// trailing line break is ignored, and a record without a match is
+    /// malformed.
+    Regex { pattern: String },
 }
 
 /// A validated description of how to parse raw records. Immutable once
@@ -34,6 +42,7 @@ pub struct ParserSpec {
 enum Paths {
     Json(JsonPaths),
     Delimited(DelimitedColumns),
+    Regex(RegexGroups),
 }
 
 impl ParserSpec {
@@ -56,13 +65,16 @@ impl ParserSpec {
                     self.insert(&mut record, name, value);
                 }
             }
-            Paths::Delimited(columns) => {
-                for (name, value) in self.names.iter().zip(columns.find(raw)?) {
-                    self.insert(&mut record, name, value);
-                }
-            }
+            Paths::Delimited(columns) => self.insert_all(&mut record, columns.find(raw)?),
+            Paths::Regex(groups) => self.insert_all(&mut record, groups.find(raw)?),
         }
         Ok(record)
+    }
+
+    fn insert_all<'a>(&'a self, record: &mut FieldRecord<'a>, values: Vec<Option<Cow<'a, str>>>) {
+        for (name, value) in self.names.iter().zip(values) {
+            self.insert(record, name, value);
+        }
     }
 
     fn insert<'a>(&self, record: &mut FieldRecord<'a>, name: &'a str, value: Option<Cow<'a, str>>) {
@@ -100,6 +112,7 @@ impl ParserSpecBuilder {
             Format::Delimited { delimiter } => {
                 Paths::Delimited(DelimitedColumns::new(delimiter, &paths)?)
             }
+            Format::Regex { pattern } => Paths::Regex(RegexGroups::new(&pattern, &paths)?),
         };
         Ok(ParserSpec {
             names,
@@ -127,6 +140,16 @@ mod tests {
     }"#;
 
     const CSV: Format = Format::Delimited { delimiter: ',' };
+
+    const ACCESS_LOG: &str = r#"203.0.113.7 - - [18/Nov/2026:10:15:32 +0000] "GET /orders?id=A-1 HTTP/1.1" 200 512 "-" "curl/8.5.0""#;
+
+    const COMBINED: &str = r#"^(?P<client>\S+) \S+ (?P<user>\S+) \[(?P<time>[^\]]+)\] "(?P<method>\S+) (?P<path>\S+) (?P<protocol>[^"]+)" (?P<status>\d{3}) (?P<bytes>\d+|-) "(?P<referer>[^"]*)" "(?P<agent>[^"]*)"$"#;
+
+    fn regex(pattern: &str) -> Format {
+        Format::Regex {
+            pattern: pattern.into(),
+        }
+    }
 
     fn spec(format: Format, fields: &[(&str, &str)]) -> ParserSpec {
         fields
@@ -200,6 +223,12 @@ mod tests {
             (Format::Json, "/order/memo", "/order/id", ORDER),
             (CSV, "1", "0", "A-1,,12.50"),
             (CSV, "1", "0", r#"A-1,"",12.50"#),
+            (
+                regex("^(?P<id>[^,]*),(?P<memo>[^,]*),"),
+                "memo",
+                "id",
+                "A-1,,12.50",
+            ),
         ] {
             let spec = ParserSpec::builder(format)
                 .field("memo", memo)
@@ -354,6 +383,117 @@ mod tests {
             .map(|i| format!(r#"A-{i},{i},"say ""{i}""""#))
             .collect();
         assert_same_records_across_threads(&delimited, &inputs);
+
+        let access_log = spec(
+            regex(COMBINED),
+            &[("path", "path"), ("status", "status"), ("user", "user")],
+        );
+        let inputs: Vec<String> = (0..64)
+            .map(|i| ACCESS_LOG.replace("A-1", &format!("A-{i}")))
+            .collect();
+        assert_same_records_across_threads(&access_log, &inputs);
+    }
+
+    #[test]
+    fn regex_selects_named_groups_in_declared_order() {
+        let spec = spec(
+            regex(COMBINED),
+            &[
+                ("status", "status"),
+                ("client", "client"),
+                ("path", "path"),
+                ("request_path", "path"),
+                ("time", "time"),
+                ("referer", "referer"),
+            ],
+        );
+        for raw in [
+            ACCESS_LOG.to_owned(),
+            format!("{ACCESS_LOG}\n"),
+            format!("{ACCESS_LOG}\r\n"),
+        ] {
+            let record = spec.parse(&raw).expect("valid record");
+            assert_eq!(
+                fields(&record),
+                [
+                    ("status", "200"),
+                    ("client", "203.0.113.7"),
+                    ("path", "/orders?id=A-1"),
+                    ("request_path", "/orders?id=A-1"),
+                    ("time", "18/Nov/2026:10:15:32 +0000"),
+                    ("referer", "-"),
+                ],
+                "{raw:?}"
+            );
+            assert!(matches!(
+                record.get_cow("path"),
+                Some(Cow::Borrowed("/orders?id=A-1"))
+            ));
+        }
+    }
+
+    #[test]
+    fn regex_group_outside_the_match_is_absent_and_empty_group_is_a_value() {
+        let spec = spec(
+            regex(r"^(?P<method>[A-Z]+) (?P<path>[^?\s]*)(?:\?(?P<query>\S*))?$"),
+            &[("path", "path"), ("query", "query")],
+        );
+        let record = spec.parse("GET /orders").expect("valid record");
+        assert_eq!(fields(&record), [("path", "/orders")]);
+
+        let record = spec.parse("GET /orders?").expect("valid record");
+        assert_eq!(fields(&record), [("path", "/orders"), ("query", "")]);
+    }
+
+    #[test]
+    fn regex_matches_anywhere_unless_anchored() {
+        let unanchored = spec(regex(r"(?P<status>\d{3})"), &[("status", "status")]);
+        let record = unanchored.parse(ACCESS_LOG).expect("valid record");
+        assert_eq!(fields(&record), [("status", "203")]);
+
+        let anchored = spec(regex(r"^(?P<status>\d{3})$"), &[("status", "status")]);
+        assert!(anchored.parse(ACCESS_LOG).is_err());
+        assert!(anchored.parse("200\n").is_ok());
+    }
+
+    #[test]
+    fn malformed_when_record_does_not_match() {
+        let spec = spec(regex(COMBINED), &[("status", "status")]);
+        let unknown_status = ACCESS_LOG.replace(" 200 ", " OK ");
+        for raw in ["", "\n", "A-1,paid,12.50", unknown_status.as_str()] {
+            assert!(spec.parse(raw).is_err(), "{raw:?}");
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_patterns() {
+        for pattern in ["(", "[a-", r"\p{Unknown}", "(?P<id>a)(?P<id>b)"] {
+            let result = ParserSpec::builder(regex(pattern))
+                .field("order_id", "id")
+                .build();
+            assert_eq!(
+                result.map(|_| ()),
+                Err(SpecError::InvalidArgument {
+                    name: "pattern".into(),
+                    value: pattern.into(),
+                }),
+                "{pattern:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_paths_that_are_not_group_names() {
+        for path in ["", "0", "1", "status ", "missing"] {
+            let result = ParserSpec::builder(regex(r"^(?P<status>\d{3}) (\S+)$"))
+                .field("status", path)
+                .build();
+            assert_eq!(
+                result.map(|_| ()),
+                Err(SpecError::InvalidPath(path.into())),
+                "{path:?}"
+            );
+        }
     }
 
     #[test]

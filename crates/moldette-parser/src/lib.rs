@@ -7,6 +7,7 @@
 
 mod delimited;
 mod json;
+mod regex;
 mod spec;
 
 pub use spec::{Format, ParserSpec, ParserSpecBuilder};

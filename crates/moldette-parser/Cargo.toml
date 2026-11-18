@@ -10,5 +10,6 @@ publish = false
 
 [dependencies]
 moldette-core = { path = "../moldette-core" }
+regex = "1.13.1"
 serde = "1.0.229"
 serde_json = { version = "1.0.154", features = ["raw_value"] }

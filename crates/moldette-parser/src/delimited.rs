@@ -37,11 +37,7 @@ impl DelimitedColumns {
     pub(crate) fn find<'a>(&self, raw: &'a str) -> Result<Vec<Option<Cow<'a, str>>>, Malformed> {
         let mut values = vec![None; self.targets.len()];
         let mut targets = self.targets.iter().peekable();
-        let line = raw
-            .strip_suffix("\r\n")
-            .or_else(|| raw.strip_suffix('\n'))
-            .unwrap_or(raw);
-        let mut rest = Some(line);
+        let mut rest = Some(without_line_break(raw));
         for column in 0.. {
             let Some(text) = rest else { break };
             let (value, next) = self.split_column(text)?;
@@ -83,6 +79,12 @@ impl DelimitedColumns {
             }),
         }
     }
+}
+
+pub(crate) fn without_line_break(raw: &str) -> &str {
+    raw.strip_suffix("\r\n")
+        .or_else(|| raw.strip_suffix('\n'))
+        .unwrap_or(raw)
 }
 
 fn unquote(quoted: &str) -> Result<(Cow<'_, str>, &str), Malformed> {

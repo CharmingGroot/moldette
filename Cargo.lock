@@ -47,6 +47,7 @@ name = "moldette-parser"
 version = "0.0.0"
 dependencies = [
  "moldette-core",
+ "regex",
  "serde",
  "serde_json",
 ]
