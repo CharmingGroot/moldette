@@ -1,6 +1,7 @@
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::ops::Range;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::thread;
 
 use moldette_config::{
@@ -122,29 +123,143 @@ fn builds_specs_that_parse_map_and_respond_to_access_log_records() {
     }
 }
 
-#[test]
-fn shares_specs_across_threads() {
-    let specs = build_yaml(include_str!("fixtures/nginx_access.yaml"), &Registry::new())
-        .expect("specs are built");
-    let expected: Vec<_> = ACCESS_LINES
+fn respond_all(specs: &Specs) -> (String, Vec<Response<'static>>) {
+    let responses = ACCESS_LINES
         .iter()
-        .map(|line| respond(&specs, line))
+        .map(|line| respond(specs, line).into_owned())
         .collect();
+    (specs.digest().to_owned(), responses)
+}
+
+#[test]
+fn shares_specs_across_threads_and_replaces_them_by_arc() {
+    let yaml = include_str!("fixtures/nginx_access.yaml");
+    let first = Arc::new(build_yaml(yaml, &Registry::new()).expect("specs are built"));
+    let second = Arc::new(
+        build_yaml(
+            &yaml.replace("constant: web-01", "constant: web-02"),
+            &Registry::new(),
+        )
+        .expect("specs are built"),
+    );
+    assert_ne!(first.digest(), second.digest());
+    let expected = [respond_all(&first), respond_all(&second)];
+    assert_ne!(expected[0].1, expected[1].1);
+
+    let current = RwLock::new(Arc::clone(&first));
     thread::scope(|scope| {
-        let workers: Vec<_> = (0..4)
+        let workers: Vec<_> = (0..8)
             .map(|_| {
                 scope.spawn(|| {
-                    ACCESS_LINES
-                        .iter()
-                        .map(|line| respond(&specs, line))
-                        .collect::<Vec<_>>()
+                    let specs = Arc::clone(&current.read().expect("lock is not poisoned"));
+                    respond_all(&specs)
                 })
             })
             .collect();
+        let held = Arc::clone(&current.read().expect("lock is not poisoned"));
+        *current.write().expect("lock is not poisoned") = Arc::clone(&second);
+        assert_eq!(respond_all(&held), expected[0]);
         for worker in workers {
-            assert_eq!(worker.join().expect("worker finishes"), expected);
+            assert!(expected.contains(&worker.join().expect("worker finishes")));
         }
     });
+    let latest = Arc::clone(&current.read().expect("lock is not poisoned"));
+    assert_eq!(respond_all(&latest), expected[1]);
+}
+
+const CSV_ORDERS: &str = r#"schemas:
+  - name: order
+    version: 1
+    fields:
+      - {name: id, type: string, required: true}
+      - {name: amount, type: float}
+parser:
+  format: delimited
+  delimiter: ","
+  fields: {id: "0", amount: "1"}
+mapper:
+  schema: {name: order, version: 1}
+  rules:
+    - {target: amount, from: amount, via: [trim]}
+resp:
+  schema: {name: order, version: 1}
+"#;
+
+fn digest_yaml(text: &str) -> String {
+    build_yaml(text, &Registry::new())
+        .expect("specs are built")
+        .digest()
+        .to_owned()
+}
+
+#[test]
+fn digests_equal_configurations_alike_in_yaml_and_json() {
+    let digest = digest_yaml(CSV_ORDERS);
+    assert_eq!(
+        digest,
+        "sha256:9d8d0ccb10f3886678daef777c57c53fdd6c944847528f7f2c24e7b3f4953589"
+    );
+
+    let rewritten = r#"# Orders exported as CSV.
+resp: {strict: false, schema: {version: 1, name: order}}
+mapper:
+  rules:
+    - via:
+        - trim
+      from: amount
+      target: amount
+  schema: {version: 1, name: order}
+parser: {fields: {id: 0, amount: 1}, delimiter: ",", format: delimited}
+schemas:
+  - fields:
+      - {type: string, required: true, name: id}
+      - {name: amount, type: float, required: false}
+    version: 1
+    name: order
+"#;
+    assert_eq!(digest_yaml(rewritten), digest);
+
+    let json = Config::from_json(
+        r#"{"schemas":[{"name":"order","version":1,"fields":[{"name":"id","type":"string","required":true},{"name":"amount","type":"float"}]}],"parser":{"format":"delimited","delimiter":",","fields":{"id":"0","amount":"1"}},"mapper":{"schema":{"name":"order","version":1},"rules":[{"target":"amount","from":"amount","via":["trim"]}]},"resp":{"schema":{"name":"order","version":1}}}"#,
+    )
+    .expect("valid JSON");
+    let specs = json.build(&Registry::new()).expect("specs are built");
+    assert_eq!(specs.digest(), digest);
+
+    let fixtures = [
+        Config::from_yaml(include_str!("fixtures/nginx_access.yaml")).expect("valid YAML"),
+        Config::from_json(include_str!("fixtures/nginx_access.json")).expect("valid JSON"),
+    ]
+    .map(|config| {
+        let specs = config.build(&Registry::new()).expect("specs are built");
+        specs.digest().to_owned()
+    });
+    assert_eq!(fixtures[0], fixtures[1]);
+    assert_ne!(fixtures[0], digest);
+}
+
+#[test]
+fn digests_configurations_that_differ_differently() {
+    let variants = [
+        CSV_ORDERS.to_owned(),
+        CSV_ORDERS.replace(r#"delimiter: ",""#, r#"delimiter: ";""#),
+        CSV_ORDERS.replace("type: float", "type: string"),
+        CSV_ORDERS.replace(", required: true", ""),
+        CSV_ORDERS.replace("via: [trim]", "via: [trim, empty_as_none]"),
+        CSV_ORDERS.replace(r#"{id: "0", amount: "1"}"#, r#"{amount: "1", id: "0"}"#),
+        CSV_ORDERS.replace(
+            "      - {name: id, type: string, required: true}\n      - {name: amount, type: float}\n",
+            "      - {name: amount, type: float}\n      - {name: id, type: string, required: true}\n",
+        ),
+        format!("{CSV_ORDERS}  strict: true\n"),
+    ];
+    let digests: HashSet<String> = variants.iter().map(|text| digest_yaml(text)).collect();
+    assert_eq!(digests.len(), variants.len());
+    for digest in &digests {
+        let hex = digest.strip_prefix("sha256:").expect("algorithm prefix");
+        assert_eq!(hex.len(), 64);
+        assert!(hex.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')));
+    }
 }
 
 #[test]
@@ -784,15 +899,106 @@ fn check_yaml(text: &str) -> Report {
 }
 
 #[test]
-fn access_log_fixtures_pass_every_check() {
-    for config in [
-        Config::from_yaml(include_str!("fixtures/nginx_access.yaml")).expect("valid YAML"),
-        Config::from_json(include_str!("fixtures/nginx_access.json")).expect("valid JSON"),
+fn access_log_fixtures_report_only_the_deprecated_field_they_map() {
+    for (config, position) in [
+        (
+            Config::from_yaml(include_str!("fixtures/nginx_access.yaml")).expect("valid YAML"),
+            Some((14, 9)),
+        ),
+        (
+            Config::from_json(include_str!("fixtures/nginx_access.json")).expect("valid JSON"),
+            None,
+        ),
     ] {
-        assert_eq!(config.check(), Report::default());
+        let expected = [(
+            DiagnosticKind::DeprecatedField("referer".into()),
+            Severity::Warning,
+            "schemas[0].fields[9]",
+            position,
+        )];
+        assert_eq!(diagnostics(&config.check()), expected);
         let specs = config.build(&Registry::new()).expect("specs are built");
-        assert!(specs.report().diagnostics().is_empty());
+        assert_eq!(diagnostics(specs.report()), expected);
     }
+}
+
+const DEPRECATED_FIELDS: &str = r#"schemas:
+  - name: order
+    version: 1
+    fields:
+      - {name: id, type: string, required: true}
+      - {name: coupon, type: string, required: true, deprecated: true}
+      - {name: note, type: string, deprecated: true}
+      - {name: channel, type: string, deprecated: true}
+      - {name: amount, type: float}
+parser:
+  format: kv
+  pair_delimiter: " "
+  key_value_delimiter: "="
+  fields: {id: id, note: note, total: total}
+mapper:
+  schema: {name: order, version: 1}
+  rules:
+    - {target: amount, from: total}
+    - {target: channel, constant: web}
+resp:
+  schema: {name: order, version: 1}
+"#;
+
+#[test]
+fn reports_deprecated_fields_a_rule_or_the_parser_still_fills() {
+    let deprecated = |name: &str, path, position| {
+        (
+            DiagnosticKind::DeprecatedField(name.into()),
+            Severity::Warning,
+            path,
+            Some(position),
+        )
+    };
+    let note = deprecated("note", "schemas[0].fields[2]", (7, 9));
+    let channel = deprecated("channel", "mapper.rules[1].target", (19, 16));
+    let specs = build_yaml(DEPRECATED_FIELDS, &Registry::new()).expect("specs are built");
+    assert_eq!(diagnostics(specs.report()), [note, channel]);
+    assert_eq!(
+        specs.report().diagnostics()[1].to_string(),
+        "mapper.rules[1].target: deprecated field `channel` is mapped at line 19, column 16"
+    );
+    let Response::Ok(mapped) = respond(&specs, "id=A-1 note=gift total=3.5") else {
+        panic!("a missing deprecated field is not required");
+    };
+    assert_eq!(mapped.get("note"), Some(&text("gift")));
+    assert_eq!(mapped.get("coupon"), None);
+
+    let explicit = DEPRECATED_FIELDS.replace(
+        "  rules:\n",
+        "  explicit_rules: true\n  rules:\n    - {target: id, from: id}\n",
+    );
+    assert_eq!(
+        diagnostics(&check_yaml(&explicit)),
+        [
+            (
+                DiagnosticKind::UnreadField("note".into()),
+                Severity::Warning,
+                "parser.fields.note",
+                Some((14, 26))
+            ),
+            deprecated("channel", "mapper.rules[2].target", (21, 16)),
+        ]
+    );
+
+    let without_parser = DEPRECATED_FIELDS.replace(
+        "parser:\n  format: kv\n  pair_delimiter: \" \"\n  key_value_delimiter: \"=\"\n  fields: {id: id, note: note, total: total}\n",
+        "",
+    );
+    assert_eq!(
+        diagnostics(&check_yaml(&without_parser)),
+        [deprecated("channel", "mapper.rules[1].target", (14, 16))]
+    );
+
+    let unfilled = DEPRECATED_FIELDS
+        .replace("note: note, ", "")
+        .replace("    - {target: channel, constant: web}\n", "");
+    assert_eq!(check_yaml(&unfilled), Report::default());
 }
 
 const UNKNOWN_SOURCES: &str = r#"schemas:

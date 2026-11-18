@@ -135,6 +135,7 @@ pub struct RuleEntry {
     pub source: SourceEntry,
     pub fallback: Option<String>,
     pub via: Vec<OpEntry>,
+    pub(crate) target_position: Option<Position>,
     pub(crate) source_positions: Vec<Option<Position>>,
     pub(crate) fallback_position: Option<Position>,
 }
@@ -396,8 +397,10 @@ fn rule(cursor: Cursor<'_>) -> Result<RuleEntry, LoadError> {
         Some(cursor) => (Some(cursor.string()?), cursor.node.position),
         None => (None, None),
     };
+    let target = map.require("target")?;
     Ok(RuleEntry {
-        target: map.require("target")?.string()?,
+        target: target.string()?,
+        target_position: target.node.position,
         source,
         fallback,
         source_positions,
