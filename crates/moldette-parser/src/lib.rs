@@ -7,6 +7,7 @@
 
 mod delimited;
 mod json;
+mod kv;
 mod regex;
 mod spec;
 
