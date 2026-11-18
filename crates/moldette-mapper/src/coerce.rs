@@ -4,9 +4,9 @@ use moldette_core::{Timestamp, Type, Value};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-pub(crate) fn coerce<'a>(text: &Cow<'a, str>, ty: Type) -> Option<Value<'a>> {
+pub(crate) fn coerce<'a>(text: Cow<'a, str>, ty: Type) -> Option<Value<'a>> {
     match ty {
-        Type::String => Some(Value::Str(text.clone())),
+        Type::String => Some(Value::Str(text)),
         Type::Int => text.parse().ok().map(Value::Int),
         Type::Float => text
             .parse::<f64>()
@@ -18,7 +18,7 @@ pub(crate) fn coerce<'a>(text: &Cow<'a, str>, ty: Type) -> Option<Value<'a>> {
             "false" => Some(Value::Bool(false)),
             _ => None,
         },
-        Type::Timestamp => parse_rfc3339(text).map(Value::Timestamp),
+        Type::Timestamp => parse_rfc3339(&text).map(Value::Timestamp),
         Type::Ip => text.parse().ok().map(Value::Ip),
     }
 }
@@ -39,7 +39,7 @@ mod tests {
     use super::*;
 
     fn convert(text: &str, ty: Type) -> Option<Value<'_>> {
-        coerce(&Cow::Borrowed(text), ty)
+        coerce(Cow::Borrowed(text), ty)
     }
 
     #[test]

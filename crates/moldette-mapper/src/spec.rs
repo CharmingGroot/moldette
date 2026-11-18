@@ -2,6 +2,7 @@ use moldette_core::{FieldRecord, Mapped, OutputSchema, SpecError};
 
 use crate::Rule;
 use crate::coerce::coerce;
+use crate::rule::CompiledRule;
 
 /// Rules for every field of an output schema, validated and immutable.
 ///
@@ -9,7 +10,7 @@ use crate::coerce::coerce;
 #[derive(Debug, Clone, PartialEq)]
 pub struct MapperSpec {
     schema: OutputSchema,
-    rules: Vec<Rule>,
+    rules: Vec<CompiledRule>,
 }
 
 impl MapperSpec {
@@ -24,19 +25,16 @@ impl MapperSpec {
         &self.schema
     }
 
-    /// Maps one record. Output field names borrow from the spec, and text
-    /// values borrow from the record.
+    /// Maps one record. Output field names, lookup values and constants
+    /// borrow from the spec, and other text values borrow from the record.
     pub fn map<'a>(&'a self, record: &FieldRecord<'a>) -> Mapped<'a> {
         let mut mapped = Mapped::new();
         for (field, rule) in self.schema.fields().iter().zip(&self.rules) {
             let mut found = false;
-            let value = rule
-                .sources()
-                .filter_map(|source| record.get_cow(source))
-                .find_map(|text| {
-                    found = true;
-                    coerce(text, field.ty())
-                });
+            let value = rule.texts(record).find_map(|text| {
+                found = true;
+                rule.apply(text).and_then(|text| coerce(text, field.ty()))
+            });
             match value {
                 Some(value) => mapped.insert(field.name(), value),
                 None if found => mapped.mark_emptied(field.name()),
@@ -59,7 +57,7 @@ impl MapperSpecBuilder {
     }
 
     /// Fails when a rule targets a field missing from the schema or a field
-    /// that already has a rule.
+    /// that already has a rule, or when an op argument is not valid.
     pub fn build(self) -> Result<MapperSpec, SpecError> {
         for (i, rule) in self.rules.iter().enumerate() {
             if self.schema.field(&rule.target).is_none() {
@@ -76,11 +74,11 @@ impl MapperSpecBuilder {
             .iter()
             .map(
                 |field| match declared.iter().position(|r| r.target == field.name()) {
-                    Some(i) => declared.swap_remove(i),
-                    None => Rule::new(field.name(), field.name()),
+                    Some(i) => declared.swap_remove(i).compile(),
+                    None => Rule::new(field.name(), field.name()).compile(),
                 },
             )
-            .collect();
+            .collect::<Result<_, _>>()?;
         Ok(MapperSpec {
             schema: self.schema,
             rules,
@@ -93,9 +91,14 @@ mod tests {
     use std::borrow::Cow;
     use std::thread;
 
-    use moldette_core::{Field, Type, Value};
+    use moldette_core::{Field, Timestamp, Type, Value};
 
     use super::*;
+
+    const LOG_TIME: &str =
+        "[day]/[month repr:short]/[year]:[hour]:[minute]:[second] [offset_hour][offset_minute]";
+    const LOCAL_TIME: &str = "[year]-[month]-[day] [hour]:[minute]:[second]";
+    const UNIX_TIME: &str = "[unix_timestamp]";
 
     fn order_schema() -> OutputSchema {
         OutputSchema::builder("order", 1)
@@ -103,6 +106,7 @@ mod tests {
             .field(Field::new("quantity", Type::Int))
             .field(Field::new("amount", Type::Float))
             .field(Field::new("paid", Type::Bool))
+            .field(Field::new("ordered_at", Type::Timestamp))
             .build()
             .expect("valid schema")
     }
@@ -110,10 +114,19 @@ mod tests {
     fn order_spec() -> MapperSpec {
         MapperSpec::builder(order_schema())
             .rule(Rule::new("order_id", "id").fallback("order_no"))
-            .rule(Rule::new("quantity", "qty").fallback("count"))
+            .rule(Rule::new("quantity", "qty").trim().fallback("count"))
             .rule(Rule::new("amount", "total"))
+            .rule(Rule::new("ordered_at", "at").timestamp([LOG_TIME, LOCAL_TIME, UNIX_TIME]))
             .build()
             .expect("valid rules")
+    }
+
+    fn map_with(rule: Rule, fields: &[(&str, &str)]) -> Mapped<'static> {
+        let spec = MapperSpec::builder(order_schema())
+            .rule(rule)
+            .build()
+            .expect("valid rule");
+        spec.map(&record(fields)).into_owned()
     }
 
     fn record<'a>(fields: &[(&'a str, &'a str)]) -> FieldRecord<'a> {
@@ -140,12 +153,172 @@ mod tests {
     #[test]
     fn text_values_borrow_from_the_record() {
         let spec = order_spec();
-        let record = record(&[("id", "A-1")]);
-        let mapped = spec.map(&record);
+        let plain = record(&[("id", "A-1")]);
+        let mapped = spec.map(&plain);
         assert!(matches!(
             mapped.get("order_id"),
             Some(Value::Str(Cow::Borrowed("A-1")))
         ));
+
+        let spec = MapperSpec::builder(order_schema())
+            .rule(Rule::new("order_id", "raw").trim().split('/', 1))
+            .build()
+            .expect("valid rule");
+        let padded = record(&[("raw", " shop/A-1 ")]);
+        assert!(matches!(
+            spec.map(&padded).get("order_id"),
+            Some(Value::Str(Cow::Borrowed("A-1")))
+        ));
+    }
+
+    #[test]
+    fn lookup_values_and_constants_borrow_from_the_spec() {
+        let spec = MapperSpec::builder(order_schema())
+            .rule(Rule::new("order_id", "channel").lookup([("w", "WEB"), ("s", "STORE")]))
+            .rule(Rule::constant("quantity", "1"))
+            .build()
+            .expect("valid rules");
+        let mapped = spec.map(&record(&[("channel", "s")]));
+        assert!(matches!(
+            mapped.get("order_id"),
+            Some(Value::Str(Cow::Borrowed("STORE")))
+        ));
+        assert_eq!(mapped.get("quantity"), Some(&Value::Int(1)));
+
+        let spec = MapperSpec::builder(order_schema())
+            .rule(Rule::constant("order_id", "WEB"))
+            .build()
+            .expect("valid rule");
+        assert!(matches!(
+            spec.map(&FieldRecord::new()).get("order_id"),
+            Some(Value::Str(Cow::Borrowed("WEB")))
+        ));
+    }
+
+    #[test]
+    fn each_op_rewrites_text_or_yields_no_value() {
+        let cases = [
+            (Rule::new("order_id", "raw").trim(), " A-1\t", Some("A-1")),
+            (
+                Rule::new("order_id", "raw").split('/', 1),
+                "shop/A-1/x",
+                Some("A-1"),
+            ),
+            (
+                Rule::new("order_id", "raw").split('/', 3),
+                "shop/A-1/x",
+                None,
+            ),
+            (
+                Rule::new("order_id", "raw").extract(r"id=(\w+)"),
+                "?id=A1&x=2",
+                Some("A1"),
+            ),
+            (
+                Rule::new("order_id", "raw").extract(r"id=(\w+)"),
+                "?x=2",
+                None,
+            ),
+            (
+                Rule::new("order_id", "raw").extract(r"id=(\d+)?"),
+                "id=x",
+                None,
+            ),
+            (
+                Rule::new("order_id", "raw").lookup([("1", "paid"), ("1", "refunded")]),
+                "1",
+                Some("paid"),
+            ),
+            (
+                Rule::new("order_id", "raw").lookup([("1", "paid")]),
+                "2",
+                None,
+            ),
+            (Rule::new("order_id", "raw").empty_as_none(), "", None),
+            (Rule::new("order_id", "raw").empty_as_none(), " ", Some(" ")),
+            (
+                Rule::new("order_id", "raw").timestamp([LOCAL_TIME]),
+                "2023-11-14 22:13:20",
+                Some("2023-11-14T22:13:20Z"),
+            ),
+        ];
+        for (rule, text, expected) in cases {
+            let mapped = map_with(rule.clone(), &[("raw", text)]);
+            assert_eq!(
+                mapped.get("order_id"),
+                expected.map(|text| Value::Str(text.into())).as_ref(),
+                "{rule:?} on {text:?}"
+            );
+            assert_eq!(mapped.emptied().count(), usize::from(expected.is_none()));
+        }
+    }
+
+    #[test]
+    fn ops_run_in_order_before_conversion() {
+        let fields = [("qty", " 3 pcs")];
+        let trimmed_first = map_with(Rule::new("quantity", "qty").trim().split(' ', 0), &fields);
+        assert_eq!(trimmed_first.get("quantity"), Some(&Value::Int(3)));
+
+        let split_first = map_with(Rule::new("quantity", "qty").split(' ', 0).trim(), &fields);
+        assert_eq!(split_first.get("quantity"), None);
+        assert_eq!(split_first.emptied().collect::<Vec<_>>(), ["quantity"]);
+    }
+
+    #[test]
+    fn timestamp_tries_formats_in_order_and_keeps_the_offset() {
+        let spec = order_spec();
+        let cases = [
+            (
+                "14/Nov/2023:22:13:20 +0900",
+                Timestamp::new(1_699_967_600, 0, 9 * 60 * 60),
+            ),
+            ("2023-11-14 22:13:20", Timestamp::new(1_700_000_000, 0, 0)),
+            ("1700000000", Timestamp::new(1_700_000_000, 0, 0)),
+            ("2023-11-14T22:13:20Z", None),
+            ("2023-02-30 00:00:00", None),
+        ];
+        for (text, expected) in cases {
+            let record = record(&[("at", text)]);
+            assert_eq!(
+                spec.map(&record).get("ordered_at"),
+                expected.map(Value::Timestamp).as_ref(),
+                "{text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn coalesce_takes_the_first_present_source_before_ops() {
+        let rule = Rule::coalesce("quantity", ["qty", "count", "n"]).trim();
+
+        let mapped = map_with(rule.clone(), &[("n", "4"), ("count", " 3")]);
+        assert_eq!(mapped.get("quantity"), Some(&Value::Int(3)));
+
+        let mapped = map_with(rule.clone(), &[("count", "x"), ("n", "4")]);
+        assert_eq!(mapped.get("quantity"), None);
+        assert_eq!(mapped.emptied().collect::<Vec<_>>(), ["quantity"]);
+
+        let mapped = map_with(rule.fallback("n"), &[("count", "x"), ("n", "4")]);
+        assert_eq!(mapped.get("quantity"), Some(&Value::Int(4)));
+
+        let mapped = map_with(Rule::coalesce("quantity", ["qty"]), &[]);
+        assert_eq!(mapped.iter().count(), 0);
+        assert_eq!(mapped.emptied().count(), 0);
+    }
+
+    #[test]
+    fn absent_op_result_falls_back_and_is_emptied_when_nothing_remains() {
+        let rule = Rule::new("order_id", "id")
+            .empty_as_none()
+            .fallback("order_no");
+
+        let mapped = map_with(rule.clone(), &[("id", ""), ("order_no", "B-2")]);
+        assert_eq!(mapped.get("order_id"), Some(&Value::Str("B-2".into())));
+        assert_eq!(mapped.emptied().count(), 0);
+
+        let mapped = map_with(rule, &[("id", ""), ("order_no", "")]);
+        assert_eq!(mapped.get("order_id"), None);
+        assert_eq!(mapped.emptied().collect::<Vec<_>>(), ["order_id"]);
     }
 
     #[test]
@@ -205,6 +378,49 @@ mod tests {
     }
 
     #[test]
+    fn rejects_invalid_or_empty_op_arguments() {
+        let empty: [&str; 0] = [];
+        let cases = [
+            (
+                Rule::new("order_id", "raw").extract("(A-"),
+                "extract.pattern",
+                "(A-",
+            ),
+            (
+                Rule::new("order_id", "raw").extract("A-1"),
+                "extract.pattern",
+                "A-1",
+            ),
+            (
+                Rule::new("order_id", "raw").extract("(A)-(1)"),
+                "extract.pattern",
+                "(A)-(1)",
+            ),
+            (
+                Rule::new("ordered_at", "at").timestamp([LOCAL_TIME, "[year"]),
+                "timestamp.formats",
+                "[year",
+            ),
+            (
+                Rule::new("ordered_at", "at").timestamp(empty),
+                "timestamp.formats",
+                "",
+            ),
+            (Rule::coalesce("quantity", empty), "coalesce.from", ""),
+        ];
+        for (rule, name, value) in cases {
+            let result = MapperSpec::builder(order_schema()).rule(rule).build();
+            assert_eq!(
+                result,
+                Err(SpecError::InvalidArgument {
+                    name: name.into(),
+                    value: value.into(),
+                })
+            );
+        }
+    }
+
+    #[test]
     fn shared_spec_maps_the_same_from_several_threads() {
         let spec = order_spec();
         let records: Vec<_> = (0..64)
@@ -212,13 +428,14 @@ mod tests {
                 let quantity = if i % 3 == 0 {
                     "x".into()
                 } else {
-                    i.to_string()
+                    format!(" {i} ")
                 };
                 let mut record = FieldRecord::new();
                 record.insert("id", format!("A-{i}"));
                 record.insert("qty", quantity);
                 record.insert("total", format!("{i}.5"));
                 record.insert("paid", if i % 2 == 0 { "true" } else { "false" });
+                record.insert("at", (1_700_000_000 + i).to_string());
                 record
             })
             .collect();
