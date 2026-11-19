@@ -158,8 +158,8 @@ improvements are tagged `v0.2.0`.
 1. README in plain text, without images or badges
 2. crate docs and metadata (`keywords`, `categories`, `readme`, `rust-version`); `publish = false` removed from the library crates
 3. `CONTRIBUTING.md`, issue and pull request templates, code of conduct (#12)
-4. repository settings: branch protection, private vulnerability reporting, OpenSSF Scorecard
-5. crates.io release 0.3.0 in dependency order and public repository, each confirmed by the maintainer first (#10)
+4. OpenSSF Scorecard workflow, which runs once the repository is public
+5. in order, each confirmed by the maintainer first (#10): public repository; repository settings that need a public repository (ruleset for `main`, private vulnerability reporting, secret scanning); crates.io release 0.3.0 in dependency order
 
 ## After v0.3
 
