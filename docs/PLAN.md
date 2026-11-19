@@ -86,7 +86,8 @@ expression language (#4).
 ## Milestones
 
 Each layer milestone starts with its standalone API and ends with tests that
-use core types only. M0 to M5 make up v0.1 (tag `v0.1.0`).
+use core types only. M0 to M5 make up v0.1 (tag `v0.1.0`); the v0.2
+improvements are tagged `v0.2.0`.
 
 ### M0 core
 
