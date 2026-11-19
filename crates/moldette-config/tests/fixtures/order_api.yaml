@@ -1,0 +1,34 @@
+schemas:
+  - name: order
+    version: 1
+    fields:
+      - {name: id, type: string, required: true}
+      - {name: status, type: string}
+      - {name: customer, type: string}
+      - {name: city, type: string}
+      - {name: first_sku, type: string}
+      - {name: first_quantity, type: int}
+      - {name: total, type: float, required: true}
+      - {name: paid, type: bool}
+      - {name: created_at, type: timestamp, required: true}
+      - {name: coupon, type: string}
+
+parser:
+  format: json
+  fields:
+    id: /id
+    status: /status
+    customer: /customer/id
+    city: /customer/address/city
+    first_sku: /items/0/sku
+    first_quantity: /items/0/quantity
+    total: /total
+    paid: /paid
+    created_at: /created_at
+    coupon: /coupon
+
+mapper:
+  schema: {name: order, version: 1}
+
+resp:
+  schema: {name: order, version: 1}
