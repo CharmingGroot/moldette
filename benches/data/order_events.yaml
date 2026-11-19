@@ -1,0 +1,34 @@
+schemas:
+  - name: order_event
+    version: 1
+    fields:
+      - {name: id, type: string, required: true}
+      - {name: time, type: timestamp, required: true}
+      - {name: customer, type: string}
+      - {name: amount, type: float, required: true}
+      - {name: paid, type: bool}
+      - {name: channel, type: string}
+
+parser:
+  format: kv
+  pair_delimiter: " "
+  key_value_delimiter: "="
+  fields:
+    id: id
+    time: ts
+    customer: customer
+    amount: amount
+    paid: paid
+    channel: ch
+
+mapper:
+  schema: {name: order_event, version: 1}
+  rules:
+    - target: channel
+      from: channel
+      via:
+        - lookup:
+            table: {w: web, s: store}
+
+resp:
+  schema: {name: order_event, version: 1}

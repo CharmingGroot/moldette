@@ -1,0 +1,22 @@
+[package]
+name = "moldette-benches"
+version = "0.0.0"
+description = "Throughput and allocation benchmarks of moldette pipelines"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+moldette = { path = "../crates/moldette" }
+
+[dev-dependencies]
+criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "throughput"
+harness = false
+
+[[bench]]
+name = "allocations"
+harness = false

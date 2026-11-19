@@ -148,7 +148,7 @@ use core types only.
 | Item | Content |
 |---|---|
 | CLI | `check`, `run`, `explain` |
-| Benchmarks | records per second and allocations per record, per parser; throughput at 1, 2, 4 and 8 threads |
+| Benchmarks | records per second and allocations per record, per parser; throughput at 1, 2, 4 and 8 threads; `benches/` (#64) |
 | Parallel batch | optional `rayon` feature |
 | Ports | sidecar (HTTP / gRPC, OTLP export), JVM (UniFFI or WASM on Chicory), Python (PyO3), sandboxed WASM user ops |
 | Supply chain | OpenSSF Scorecard and Best Practices badge at the first public release; artifact attestations at the first binary release |
