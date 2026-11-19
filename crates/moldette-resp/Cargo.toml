@@ -1,6 +1,6 @@
 [package]
 name = "moldette-resp"
-version = "0.0.0"
+version.workspace = true
 description = "Turns mapped records into moldette responses"
 edition.workspace = true
 license.workspace = true

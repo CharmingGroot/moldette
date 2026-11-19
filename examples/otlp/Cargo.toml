@@ -1,6 +1,6 @@
 [package]
 name = "moldette-otlp-example"
-version = "0.0.0"
+version.workspace = true
 description = "Exports the tracing signals of a moldette pipeline over OTLP"
 edition.workspace = true
 license.workspace = true

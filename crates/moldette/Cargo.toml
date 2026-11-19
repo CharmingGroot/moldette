@@ -1,6 +1,6 @@
 [package]
 name = "moldette"
-version = "0.0.0"
+version.workspace = true
 description = "Turns one raw record into one record of a declared output schema"
 edition.workspace = true
 license.workspace = true

@@ -1,6 +1,6 @@
 [package]
 name = "moldette-test-tracing"
-version = "0.0.0"
+version.workspace = true
 description = "Collects tracing signals in the tests of moldette crates"
 edition.workspace = true
 license.workspace = true
