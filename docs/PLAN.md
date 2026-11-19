@@ -184,6 +184,7 @@ improvements are tagged `v0.2.0`.
 ## Contributing
 
 Pull requests are accepted only for issues assigned by the maintainer (#12).
+The rules are in `CONTRIBUTING.md`.
 
 ## License
 

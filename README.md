@@ -82,7 +82,8 @@ described in `docs/PLAN.md`.
 ## Contributing
 
 Issues are welcome. Pull requests are accepted only for issues assigned by the
-maintainer. Report vulnerabilities as described in `SECURITY.md`.
+maintainer; see `CONTRIBUTING.md`. Report vulnerabilities as described in
+`SECURITY.md`. Participation is governed by `CODE_OF_CONDUCT.md`.
 
 ## License
 

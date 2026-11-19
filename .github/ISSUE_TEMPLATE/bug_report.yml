@@ -1,0 +1,31 @@
+name: Bug report
+description: A record, configuration or API call that gives a wrong result or fails.
+labels: ["type:bug"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Crate version or commit, and the features enabled.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction
+      description: The smallest configuration and input record that show the problem, and the code that runs them.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed behavior
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
