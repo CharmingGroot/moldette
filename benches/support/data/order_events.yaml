@@ -8,6 +8,7 @@ schemas:
       - {name: amount, type: float, required: true}
       - {name: paid, type: bool}
       - {name: channel, type: string}
+      - {name: note, type: string}
 
 parser:
   format: kv
@@ -20,6 +21,7 @@ parser:
     amount: amount
     paid: paid
     channel: ch
+    note: note
 
 mapper:
   schema: {name: order_event, version: 1}

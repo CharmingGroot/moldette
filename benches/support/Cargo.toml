@@ -1,0 +1,11 @@
+[package]
+name = "moldette-bench-support"
+version.workspace = true
+description = "Workloads and allocation counting shared by the moldette benchmarks"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+moldette-core = { path = "../../crates/moldette-core" }

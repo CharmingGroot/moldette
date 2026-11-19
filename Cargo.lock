@@ -695,11 +695,65 @@ dependencies = [
 ]
 
 [[package]]
-name = "moldette-benches"
+name = "moldette-bench-config"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "moldette-bench-support",
+ "moldette-config",
+]
+
+[[package]]
+name = "moldette-bench-core"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "moldette-bench-support",
+ "moldette-core",
+]
+
+[[package]]
+name = "moldette-bench-mapper"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "moldette-bench-support",
+ "moldette-mapper",
+]
+
+[[package]]
+name = "moldette-bench-parser"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "moldette-bench-support",
+ "moldette-parser",
+]
+
+[[package]]
+name = "moldette-bench-pipeline"
 version = "0.1.0"
 dependencies = [
  "criterion",
  "moldette",
+ "moldette-bench-support",
+]
+
+[[package]]
+name = "moldette-bench-resp"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "moldette-bench-support",
+ "moldette-core",
+ "moldette-resp",
+]
+
+[[package]]
+name = "moldette-bench-support"
+version = "0.1.0"
+dependencies = [
+ "moldette-core",
 ]
 
 [[package]]

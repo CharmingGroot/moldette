@@ -4,11 +4,11 @@ from affected import Workspace, lock_changes, plan, runs_deny, shared_module_war
 
 CORE, PARSER, MAPPER, RESP = "moldette-core", "moldette-parser", "moldette-mapper", "moldette-resp"
 CONFIG, FACADE, TEST_TRACING = "moldette-config", "moldette", "moldette-test-tracing"
-EXAMPLE, BENCHES = "moldette-otlp-example", "moldette-benches"
+EXAMPLE, BENCHES = "moldette-otlp-example", "moldette-bench-pipeline"
 
 WORKSPACE = Workspace(
     dirs={**{name: f"crates/{name}" for name in (CORE, PARSER, MAPPER, RESP, CONFIG, FACADE, TEST_TRACING)},
-          EXAMPLE: "examples/otlp", BENCHES: "benches"},
+          EXAMPLE: "examples/otlp", BENCHES: "benches/pipeline"},
     dependencies={
         CORE: {},
         PARSER: {CORE: True, TEST_TRACING: False},
@@ -159,7 +159,7 @@ class PlanTest(unittest.TestCase):
         self.assertTrue(runs_deny(["examples/otlp/Cargo.toml"]))
 
     def test_benches_change_runs_only_the_benches_in_full_for_the_host(self):
-        self.assertEqual(scoped("benches/src/lib.rs"), [entry(BENCHES, "full")])
+        self.assertEqual(scoped("benches/pipeline/src/lib.rs"), [entry(BENCHES, "full")])
 
     def test_coupling_tests_of_several_changes_are_merged(self):
         self.assertEqual(scoped("crates/moldette-parser/src/kv.rs", "crates/moldette-parser/src/json.rs",
