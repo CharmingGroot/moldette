@@ -12,7 +12,7 @@ fn map(c: &mut Criterion) {
     for workload in Workload::ALL {
         let spec = mapper_spec(workload);
         let mut group = c.benchmark_group(format!("mapper/{}", workload.format()));
-        let cases = cases(workload, |i, size| workload.fields(i, size));
+        let cases = cases(workload, &BATCHES, |i, size| workload.fields(i, size));
         for case in &cases {
             let records: Vec<_> = case.inputs.iter().map(borrowed).collect();
             group.throughput(Throughput::Elements(case.inputs.len() as u64));

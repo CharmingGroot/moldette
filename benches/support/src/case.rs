@@ -9,9 +9,13 @@ pub struct Case<T> {
 }
 
 /// One case per record size (`record/100B`, `record/10KiB`, `record/1MiB`)
-/// and per batch size (`batch/1MiB`, `batch/16MiB`), with the inputs that
+/// and per entry of `batches` (`batch/1MiB`, ...), with the inputs that
 /// `input` builds from each record index and size.
-pub fn cases<T>(workload: Workload, input: impl Fn(usize, Size) -> T) -> Vec<Case<T>> {
+pub fn cases<T>(
+    workload: Workload,
+    batches: &[(&str, usize)],
+    input: impl Fn(usize, Size) -> T,
+) -> Vec<Case<T>> {
     let records = Size::ALL.into_iter().map(|size| {
         let raw_bytes = size
             .indices()
@@ -23,7 +27,7 @@ pub fn cases<T>(workload: Workload, input: impl Fn(usize, Size) -> T) -> Vec<Cas
             raw_bytes,
         }
     });
-    let batches = BATCHES.into_iter().map(|(label, bytes)| {
+    let batches = batches.iter().map(|&(label, bytes)| {
         let raws = batch(workload, bytes);
         Case {
             name: format!("batch/{label}"),

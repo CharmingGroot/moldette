@@ -9,7 +9,7 @@ fn respond(c: &mut Criterion) {
     for workload in Workload::ALL {
         let spec = resp_spec(workload);
         let mut group = c.benchmark_group(format!("resp/{}", workload.format()));
-        let cases = cases(workload, |i, size| workload.mapped(i, size));
+        let cases = cases(workload, &BATCHES, |i, size| workload.mapped(i, size));
         for case in &cases {
             group.throughput(Throughput::Elements(case.inputs.len() as u64));
             group.sample_size(if case.raw_bytes > 1 << 20 { 10 } else { 50 });

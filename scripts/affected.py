@@ -7,7 +7,8 @@ A change to core, to a shared kernel module or to a crate root counts as a
 change to every module of that crate, and core runs every crate that uses it
 in full. A `Cargo.lock` change runs in full the crates whose resolved
 dependency tree changed. A crate under `examples/` or `benches/` skips the
-wasm32 build and, unless it changed itself, is only compiled.
+wasm32 build and, unless it changed itself, is only compiled; a benchmark
+crate with allocation tests runs those instead (#64).
 
 Usage: affected.py BASE_REF HEAD_REF
        affected.py --full
@@ -45,6 +46,13 @@ TEST_TRACING_CRATE = "moldette-test-tracing"
 HOST_ONLY_DIRS = ("examples/", "benches/")
 LOWERING_TESTS = "--test lowering"
 E2E_TESTS = "--test e2e"
+ALLOCATION_TESTS = "--test allocations"
+ALLOCATION_CRATES = (
+    "moldette-bench-parser",
+    "moldette-bench-mapper",
+    "moldette-bench-resp",
+    "moldette-bench-pipeline",
+)
 TRACING_TESTS = "--test tracing --features tracing"
 SHARED_USE_WARNING = 3
 SCOPES = ("check", "edge", "full")
@@ -187,7 +195,11 @@ def plan(files: list[str], workspace: Workspace, graphs: dict[str, Graph],
                     raise_scope(scopes, indirect, "check")
     for crate in scopes:
         if workspace.is_host_only(crate) and crate not in changes and crate not in lock_changed:
-            scopes[crate] = "check"
+            if crate in ALLOCATION_CRATES:
+                scopes[crate] = "edge"
+                tests[crate] = {ALLOCATION_TESTS: None}
+            else:
+                scopes[crate] = "check"
     return matrix(scopes, tests, workspace)
 
 

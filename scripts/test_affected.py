@@ -76,7 +76,7 @@ class PlanTest(unittest.TestCase):
     def test_parser_format_runs_lowering_of_the_format_and_spec_and_its_e2e_module(self):
         self.assertEqual(scoped("crates/moldette-parser/src/kv.rs"), [
             entry(FACADE, "edge", "--test e2e -- kv::"),
-            entry(BENCHES, "check"),
+            entry(BENCHES, "edge", "--test allocations"),
             entry(CONFIG, "edge", "--test lowering -- lower::parser::kv:: lower::parser::spec::"),
             entry(EXAMPLE, "check"),
             entry(PARSER, "full"),
@@ -88,7 +88,7 @@ class PlanTest(unittest.TestCase):
     def test_mapper_op_runs_lowering_of_op_and_its_users_and_whole_e2e(self):
         self.assertEqual(scoped("crates/moldette-mapper/src/op.rs"), [
             entry(FACADE, "edge", "--test e2e"),
-            entry(BENCHES, "check"),
+            entry(BENCHES, "edge", "--test allocations"),
             entry(CONFIG, "edge", "--test lowering -- lower::mapper::op:: lower::mapper::recorder:: "
                                   "lower::mapper::rule:: lower::mapper::spec::"),
             entry(MAPPER, "full"),
@@ -98,14 +98,15 @@ class PlanTest(unittest.TestCase):
     def test_config_lineage_runs_config_in_full_and_whole_e2e(self):
         self.assertEqual(scoped("crates/moldette-config/src/lineage.rs"), [
             entry(FACADE, "edge", "--test e2e"),
-            entry(BENCHES, "check"),
+            entry(BENCHES, "edge", "--test allocations"),
             entry(CONFIG, "full"),
             entry(EXAMPLE, "check"),
         ])
 
     def test_core_runs_every_library_crate_that_uses_it_in_full(self):
         self.assertEqual(scoped("crates/moldette-core/src/value.rs"),
-                         [entry(e["crate"], "check") if e["crate"] in (EXAMPLE, BENCHES) else e
+                         [entry(EXAMPLE, "check") if e["crate"] == EXAMPLE else
+                          entry(BENCHES, "edge", "--test allocations") if e["crate"] == BENCHES else e
                           for e in ALL_FULL if e["crate"] != TEST_TRACING])
 
     def test_test_tracing_runs_tracing_tests_of_dev_dependents_only(self):
@@ -131,7 +132,7 @@ class PlanTest(unittest.TestCase):
     def test_parser_shared_kernel_counts_as_change_to_every_parser_module(self):
         self.assertEqual(scoped("crates/moldette-parser/src/text.rs"), [
             entry(FACADE, "edge", "--test e2e"),
-            entry(BENCHES, "check"),
+            entry(BENCHES, "edge", "--test allocations"),
             entry(CONFIG, "edge", "--test lowering -- lower::parser::"),
             entry(EXAMPLE, "check"),
             entry(PARSER, "full"),
@@ -149,7 +150,7 @@ class PlanTest(unittest.TestCase):
     def test_facade_change_compiles_example_and_benches_for_the_host(self):
         self.assertEqual(scoped("crates/moldette/src/pipeline.rs"), [
             entry(FACADE, "full"),
-            entry(BENCHES, "check"),
+            entry(BENCHES, "edge", "--test allocations"),
             entry(EXAMPLE, "check"),
         ])
 
@@ -165,7 +166,7 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(scoped("crates/moldette-parser/src/kv.rs", "crates/moldette-parser/src/json.rs",
                                 "crates/moldette-mapper/src/coerce.rs")[:3], [
             entry(FACADE, "edge", "--test e2e"),
-            entry(BENCHES, "check"),
+            entry(BENCHES, "edge", "--test allocations"),
             entry(CONFIG, "edge", "--test lowering -- lower::mapper::coerce:: lower::mapper::rule:: "
                                   "lower::parser::json:: lower::parser::kv:: lower::parser::spec::"),
         ])

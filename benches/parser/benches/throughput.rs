@@ -10,7 +10,7 @@ fn parse(c: &mut Criterion) {
     for workload in Workload::ALL {
         let spec = parser_spec(workload);
         let mut group = c.benchmark_group(format!("parser/{}", workload.format()));
-        let cases = cases(workload, |i, size| workload.raw(i, size));
+        let cases = cases(workload, &BATCHES, |i, size| workload.raw(i, size));
         for case in &cases {
             group.throughput(Throughput::ElementsAndBytes {
                 elements: case.inputs.len() as u64,

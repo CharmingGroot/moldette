@@ -1,6 +1,8 @@
 //! Mapper specs of the benchmark workloads, built with the rule builder only.
 
-use moldette_bench_support::Workload;
+use std::hint::black_box;
+
+use moldette_bench_support::{BATCHES, Workload, borrowed, cases, per_input};
 use moldette_mapper::{MapperSpec, Rule};
 
 const STATUS_CLASSES: [(&str, &str); 5] = [
@@ -46,6 +48,28 @@ pub fn mapper_spec(workload: Workload) -> MapperSpec {
         })
         .build()
         .expect("valid mapper spec")
+}
+
+/// Mean allocations per record of each case, at most the first batch size,
+/// as `<layer>/<format>/<case>` and a count rounded to two decimals. Counts
+/// are zero unless the calling binary uses `CountingAllocator` (#64).
+pub fn allocations_per_record() -> Vec<String> {
+    let mut rows = Vec::new();
+    for workload in Workload::ALL {
+        let spec = mapper_spec(workload);
+        for case in cases(workload, &BATCHES[..1], |i, size| workload.fields(i, size)) {
+            let records: Vec<_> = case.inputs.iter().map(borrowed).collect();
+            let count = per_input(&records, |record| {
+                black_box(spec.map(record));
+            });
+            rows.push(format!(
+                "mapper/{}/{} {count:.2}",
+                workload.format(),
+                case.name
+            ));
+        }
+    }
+    rows
 }
 
 #[cfg(test)]
