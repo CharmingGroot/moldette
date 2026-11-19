@@ -84,13 +84,13 @@ jobs:
         run: cargo clippy -p "$CRATE" --all-targets
       - if: matrix.scope == 'full'
         run: cargo test -p "$CRATE"
-      - if: matrix.scope == 'full'
+      - if: matrix.scope == 'full' && matrix.wasm
         run: cargo build -p "$CRATE" --target wasm32-unknown-unknown
       - if: matrix.scope == 'full'
         run: cargo clippy -p "$CRATE" --all-targets --all-features
       - if: matrix.scope == 'full'
         run: cargo test -p "$CRATE" --all-features
-      - if: matrix.scope == 'full'
+      - if: matrix.scope == 'full' && matrix.wasm
         run: cargo build -p "$CRATE" --target wasm32-unknown-unknown --all-features
       - name: Each feature alone, for crates with default features
         if: matrix.scope == 'full'
@@ -117,9 +117,9 @@ jobs:
             read -ra args <<< "$test"
             cargo test -p "$CRATE" "${args[@]}"
           done
-      - if: matrix.scope == 'edge'
+      - if: matrix.scope == 'edge' && matrix.wasm
         run: cargo check -p "$CRATE" --target wasm32-unknown-unknown
-      - if: matrix.scope == 'edge'
+      - if: matrix.scope == 'edge' && matrix.wasm
         run: cargo check -p "$CRATE" --target wasm32-unknown-unknown --all-features
 
   deny:

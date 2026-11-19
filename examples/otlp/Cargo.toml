@@ -1,0 +1,16 @@
+[package]
+name = "moldette-otlp-example"
+version = "0.0.0"
+description = "Exports the tracing signals of a moldette pipeline over OTLP"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+moldette = { path = "../../crates/moldette", features = ["tracing"] }
+opentelemetry = { version = "0.33.1", default-features = false, features = ["trace"] }
+opentelemetry-otlp = { version = "0.33.1", default-features = false, features = ["trace", "http-proto", "reqwest-blocking-client"] }
+opentelemetry_sdk = { version = "0.33.1", default-features = false, features = ["trace"] }
+tracing-opentelemetry = { version = "0.34.0", default-features = false }
+tracing-subscriber = { version = "0.3.23", default-features = false, features = ["registry", "std"] }

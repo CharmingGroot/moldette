@@ -6,7 +6,8 @@ and a crate that depends on it through another crate is compiled (check).
 A change to core, to a shared kernel module or to a crate root counts as a
 change to every module of that crate, and core runs every crate that uses it
 in full. A `Cargo.lock` change runs in full the crates whose resolved
-dependency tree changed.
+dependency tree changed. A crate under `examples/` skips the wasm32 build and,
+unless it changed itself, is only compiled.
 
 Usage: affected.py BASE_REF HEAD_REF
        affected.py --full
@@ -41,6 +42,7 @@ LOWERING_CRATE = "moldette-config"
 FACADE_CRATE = "moldette"
 FORMAT_CRATE = "moldette-parser"
 TEST_TRACING_CRATE = "moldette-test-tracing"
+EXAMPLES_DIR = "examples/"
 LOWERING_TESTS = "--test lowering"
 E2E_TESTS = "--test e2e"
 TRACING_TESTS = "--test tracing --features tracing"
@@ -74,6 +76,9 @@ class Workspace:
                     found.add(dependent)
                     pending.append(dependent)
         return found
+
+    def is_example(self, crate: str) -> bool:
+        return self.dirs[crate].startswith(EXAMPLES_DIR)
 
 
 def is_full_path(path: str) -> bool:
@@ -144,14 +149,16 @@ def render_tests(tests: dict[str, Filters]) -> list[str]:
             for target, filters in sorted(tests.items())]
 
 
-def matrix(scopes: dict[str, str], tests: dict[str, dict[str, Filters]]) -> list[dict]:
+def matrix(scopes: dict[str, str], tests: dict[str, dict[str, Filters]],
+           workspace: Workspace) -> list[dict]:
     return [{"crate": crate, "scope": scope,
-             "tests": render_tests(tests[crate]) if scope == "edge" else []}
+             "tests": render_tests(tests[crate]) if scope == "edge" else [],
+             "wasm": not workspace.is_example(crate)}
             for crate, scope in sorted(scopes.items())]
 
 
 def full_plan(workspace: Workspace) -> list[dict]:
-    return matrix({crate: "full" for crate in workspace.dirs}, {})
+    return matrix({crate: "full" for crate in workspace.dirs}, {}, workspace)
 
 
 def plan(files: list[str], workspace: Workspace, graphs: dict[str, Graph],
@@ -161,7 +168,8 @@ def plan(files: list[str], workspace: Workspace, graphs: dict[str, Graph],
         return full_plan(workspace)
     scopes = {crate: "full" for crate in lock_changed}
     tests: dict[str, dict[str, Filters]] = {}
-    for crate, modules in changed_modules(files, workspace, graphs).items():
+    changes = changed_modules(files, workspace, graphs)
+    for crate, modules in changes.items():
         raise_scope(scopes, crate, "full")
         if crate in SHARED_KERNEL_CRATES:
             for user in workspace.users(crate, dev=True):
@@ -177,7 +185,10 @@ def plan(files: list[str], workspace: Workspace, graphs: dict[str, Graph],
             if normal:
                 for indirect in workspace.users(dependent, dev=False):
                     raise_scope(scopes, indirect, "check")
-    return matrix(scopes, tests)
+    for crate in scopes:
+        if workspace.is_example(crate) and crate not in changes and crate not in lock_changed:
+            scopes[crate] = "check"
+    return matrix(scopes, tests, workspace)
 
 
 def lock_packages(text: str) -> dict[tuple, list[str]]:
