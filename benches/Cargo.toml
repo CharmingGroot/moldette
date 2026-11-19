@@ -1,6 +1,6 @@
 [package]
 name = "moldette-benches"
-version = "0.0.0"
+version.workspace = true
 description = "Throughput and allocation benchmarks of moldette pipelines"
 edition.workspace = true
 license.workspace = true

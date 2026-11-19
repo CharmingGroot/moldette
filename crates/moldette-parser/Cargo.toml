@@ -1,6 +1,6 @@
 [package]
 name = "moldette-parser"
-version = "0.0.0"
+version.workspace = true
 description = "Parses one raw record into named text fields"
 edition.workspace = true
 license.workspace = true

@@ -86,7 +86,7 @@ expression language (#4).
 ## Milestones
 
 Each layer milestone starts with its standalone API and ends with tests that
-use core types only.
+use core types only. M0 to M5 make up v0.1 (tag `v0.1.0`).
 
 ### M0 core
 
@@ -143,12 +143,19 @@ use core types only.
 2. end-to-end tests over JSON API responses, CSV and nginx access logs
 3. `tracing` to OpenTelemetry (OTLP) example
 
-## After the core
+### v0.2 improvements
+
+1. benchmarks per dependency branch (core, parser, mapper, resp, configuration, pipeline); records of 100 B, 10 KiB and 1 MiB, batches of 1 MiB and 16 MiB; records per second and MB/s (#64)
+2. fewer allocations per record in parse and process
+3. throughput scaling at 2, 4 and 8 threads
+4. allocations per record checked in CI (#64)
+5. public API review before the first public release (#66)
+
+## After v0.2
 
 | Item | Content |
 |---|---|
 | CLI | `check`, `run`, `explain` |
-| Benchmarks | records per second and allocations per record, per parser; throughput at 1, 2, 4 and 8 threads; `benches/` (#64) |
 | Parallel batch | optional `rayon` feature |
 | Ports | sidecar (HTTP / gRPC, OTLP export), JVM (UniFFI or WASM on Chicory), Python (PyO3), sandboxed WASM user ops |
 | Supply chain | OpenSSF Scorecard and Best Practices badge at the first public release; artifact attestations at the first binary release |
