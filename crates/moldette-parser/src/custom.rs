@@ -91,13 +91,17 @@ impl<P: Parser + 'static> ResolvePaths for P {
 pub(crate) struct CustomPaths(Arc<dyn FindValues>);
 
 impl CustomPaths {
-    pub(crate) fn find<'a>(&self, raw: &'a str) -> Result<Vec<Option<Cow<'a, str>>>, Malformed> {
-        self.0.find(without_line_break(raw))
+    pub(crate) fn find<'a>(
+        &self,
+        raw: &'a str,
+        values: &mut [Option<Cow<'a, str>>],
+    ) -> Result<(), Malformed> {
+        self.0.find(without_line_break(raw), values)
     }
 }
 
 trait FindValues: fmt::Debug + Send + Sync + RefUnwindSafe {
-    fn find<'a>(&self, raw: &'a str) -> Result<Vec<Option<Cow<'a, str>>>, Malformed>;
+    fn find<'a>(&self, raw: &'a str, values: &mut [Option<Cow<'a, str>>]) -> Result<(), Malformed>;
 }
 
 #[derive(Debug)]
@@ -107,9 +111,7 @@ struct Resolved<P: Parser> {
 }
 
 impl<P: Parser> FindValues for Resolved<P> {
-    fn find<'a>(&self, raw: &'a str) -> Result<Vec<Option<Cow<'a, str>>>, Malformed> {
-        let mut values = vec![None; self.paths.len()];
-        self.parser.read(raw, &self.paths, &mut values)?;
-        Ok(values)
+    fn find<'a>(&self, raw: &'a str, values: &mut [Option<Cow<'a, str>>]) -> Result<(), Malformed> {
+        self.parser.read(raw, &self.paths, values)
     }
 }

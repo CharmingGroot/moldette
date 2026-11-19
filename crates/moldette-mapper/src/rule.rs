@@ -2,8 +2,8 @@ use std::borrow::Cow;
 
 use moldette_core::{Field, FieldRecord, Mapped, SpecError, Type, Value};
 
-use crate::coerce::coerce;
-use crate::op::{CompiledOp, CustomOp, DeclaredOp, Op, invalid_argument};
+use crate::coerce::{coerce, to_timestamp};
+use crate::op::{CompiledOp, CustomOp, DeclaredOp, Op, invalid_argument, read_rfc3339_time};
 use crate::recorder::Recorder;
 use crate::telemetry;
 
@@ -207,15 +207,30 @@ impl CompiledRule {
         ty: Type,
         recorder: &mut R,
     ) -> Option<Value<'a>> {
-        let text = self.via.iter().try_fold(text, |text, op| {
-            let output = op.apply(text);
-            recorder.step(op, output.as_ref());
-            output
-        })?;
-        let value = coerce(text, ty);
+        let value = match (self.via.split_last(), ty) {
+            (Some((last @ CompiledOp::Timestamp(formats), leading)), Type::Timestamp) => {
+                let text = apply_ops(leading, text, recorder)?;
+                let time = read_rfc3339_time(formats, &text);
+                recorder.step_time(last, time.as_ref());
+                to_timestamp(time?).map(Value::Timestamp)
+            }
+            _ => coerce(apply_ops(&self.via, text, recorder)?, ty),
+        };
         recorder.coerced(value.as_ref());
         value
     }
+}
+
+fn apply_ops<'a, R: Recorder<'a>>(
+    ops: &'a [CompiledOp],
+    text: Cow<'a, str>,
+    recorder: &mut R,
+) -> Option<Cow<'a, str>> {
+    ops.iter().try_fold(text, |text, op| {
+        let output = op.apply(text);
+        recorder.step(op, output.as_ref());
+        output
+    })
 }
 
 fn read_field<'a, R: Recorder<'a>>(

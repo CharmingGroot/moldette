@@ -24,11 +24,14 @@ pub(crate) fn coerce<'a>(text: Cow<'a, str>, ty: Type) -> Option<Value<'a>> {
 }
 
 fn parse_rfc3339(text: &str) -> Option<Timestamp> {
-    let parsed = OffsetDateTime::parse(text, &Rfc3339).ok()?;
+    to_timestamp(OffsetDateTime::parse(text, &Rfc3339).ok()?)
+}
+
+pub(crate) fn to_timestamp(time: OffsetDateTime) -> Option<Timestamp> {
     Timestamp::new(
-        parsed.unix_timestamp(),
-        parsed.nanosecond(),
-        parsed.offset().whole_seconds(),
+        time.unix_timestamp(),
+        time.nanosecond(),
+        time.offset().whole_seconds(),
     )
 }
 

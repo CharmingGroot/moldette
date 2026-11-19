@@ -322,6 +322,18 @@ mod tests {
                 Some("2023-11-14T22:13:20Z"),
             ),
             (
+                Rule::new("order_id", "raw")
+                    .timestamp([LOCAL_TIME])
+                    .split('T', 0),
+                "2023-11-14 22:13:20",
+                Some("2023-11-14"),
+            ),
+            (
+                Rule::new("order_id", "raw").timestamp([UNIX_TIME]),
+                "253402300800",
+                None,
+            ),
+            (
                 Rule::new("order_id", "raw").via(Cents),
                 "1250",
                 Some("12.50"),
@@ -397,6 +409,7 @@ mod tests {
             ("1700000000", Timestamp::new(1_700_000_000, 0, 0)),
             ("2023-11-14T22:13:20Z", None),
             ("2023-02-30 00:00:00", None),
+            ("253402300800", None),
         ];
         for (text, expected) in cases {
             let record = record(&[("at", text)]);
@@ -756,6 +769,52 @@ mod tests {
                 ),
                 explained_field("paid", [explained(field("paid"), Some("yes"), &[], None)],),
             ]
+        );
+    }
+
+    #[test]
+    fn explain_records_the_text_a_timestamp_op_writes() {
+        let schema = OutputSchema::builder("order", 1)
+            .field(Field::new("ordered_at", Type::Timestamp))
+            .build()
+            .expect("valid schema");
+        let spec = MapperSpec::builder(schema)
+            .rule(
+                Rule::new("ordered_at", "at")
+                    .trim()
+                    .timestamp([LOCAL_TIME, UNIX_TIME])
+                    .fallback("placed"),
+            )
+            .build()
+            .expect("valid rule");
+        let record = record(&[("at", " 253402300800"), ("placed", "2023-11-14 22:13:20")]);
+
+        let (mapped, explain) = spec.explain(&record);
+
+        assert_eq!(mapped, spec.map(&record));
+        let field = |name| ExplainSource::Field(Cow::Borrowed(name));
+        assert_eq!(
+            explain.fields(),
+            [explained_field(
+                "ordered_at",
+                [
+                    explained(
+                        field("at"),
+                        Some(" 253402300800"),
+                        &[("trim", Some("253402300800")), ("timestamp", None)],
+                        None,
+                    ),
+                    explained(
+                        field("placed"),
+                        Some("2023-11-14 22:13:20"),
+                        &[
+                            ("trim", Some("2023-11-14 22:13:20")),
+                            ("timestamp", Some("2023-11-14T22:13:20Z")),
+                        ],
+                        Timestamp::new(1_700_000_000, 0, 0).map(Value::Timestamp),
+                    ),
+                ],
+            )]
         );
     }
 }

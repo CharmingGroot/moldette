@@ -19,6 +19,7 @@ mod delimited;
 mod json;
 mod kv;
 mod regex;
+mod slots;
 mod spec;
 mod telemetry;
 mod text;

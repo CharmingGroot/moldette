@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt;
+use std::io;
 use std::panic::RefUnwindSafe;
 use std::sync::Arc;
 
@@ -163,10 +164,8 @@ impl CompiledOp {
             Self::Lookup(table) => table
                 .get(text.as_ref())
                 .map(|value| Cow::Borrowed(value.as_str())),
-            Self::Timestamp(formats) => formats
-                .iter()
-                .find_map(|format| parse_timestamp(&text, format))
-                .and_then(|timestamp| timestamp.format(&Rfc3339).ok())
+            Self::Timestamp(formats) => read_time(formats, &text)
+                .and_then(|time| time.format(&Rfc3339).ok())
                 .map(Cow::Owned),
             Self::EmptyAsNone => (!text.is_empty()).then_some(text),
             Self::Custom(op) => op.apply(text),
@@ -182,6 +181,16 @@ fn substring<'a>(
         Cow::Borrowed(text) => select(text).map(Cow::Borrowed),
         Cow::Owned(text) => select(&text).map(|part| Cow::Owned(part.to_owned())),
     }
+}
+
+pub(crate) fn read_rfc3339_time(formats: &[OwnedFormatItem], text: &str) -> Option<OffsetDateTime> {
+    read_time(formats, text).filter(|time| time.format_into(&mut io::sink(), &Rfc3339).is_ok())
+}
+
+fn read_time(formats: &[OwnedFormatItem], text: &str) -> Option<OffsetDateTime> {
+    formats
+        .iter()
+        .find_map(|format| parse_timestamp(text, format))
 }
 
 fn parse_timestamp(text: &str, format: &OwnedFormatItem) -> Option<OffsetDateTime> {
