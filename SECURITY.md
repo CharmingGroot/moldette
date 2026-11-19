@@ -17,5 +17,4 @@ private security advisory and disclosed after a fixed version is available.
 
 ## Supported versions
 
-Only the latest `0.x` release receives security fixes. No release has been
-published yet; until then, fixes go to `main`.
+Only the latest `0.x` release receives security fixes.
