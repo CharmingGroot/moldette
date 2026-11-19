@@ -34,8 +34,11 @@ impl DelimitedColumns {
         Ok(Self { delimiter, targets })
     }
 
-    pub(crate) fn find<'a>(&self, raw: &'a str) -> Result<Vec<Option<Cow<'a, str>>>, Malformed> {
-        let mut values = vec![None; self.targets.len()];
+    pub(crate) fn find<'a>(
+        &self,
+        raw: &'a str,
+        values: &mut [Option<Cow<'a, str>>],
+    ) -> Result<(), Malformed> {
         let mut targets = self.targets.iter().peekable();
         let mut rest = Some(without_line_break(raw));
         for column in 0.. {
@@ -55,7 +58,7 @@ impl DelimitedColumns {
             }
             rest = next;
         }
-        Ok(values)
+        Ok(())
     }
 
     fn split_column<'a>(

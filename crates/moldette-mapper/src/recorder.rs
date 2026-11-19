@@ -3,6 +3,8 @@ use std::borrow::Cow;
 use moldette_core::{
     Explain, ExplainField, ExplainRead, ExplainSource, ExplainStep, OutputSchema, Value,
 };
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 
 use crate::op::CompiledOp;
 
@@ -15,6 +17,13 @@ pub(crate) trait Recorder<'a> {
     fn constant(&mut self, value: &'a str);
 
     fn step(&mut self, op: &'a CompiledOp, output: Option<&Cow<'a, str>>);
+
+    fn step_time(&mut self, op: &'a CompiledOp, time: Option<&OffsetDateTime>) {
+        let output = time
+            .and_then(|time| time.format(&Rfc3339).ok())
+            .map(Cow::Owned);
+        self.step(op, output.as_ref());
+    }
 
     fn coerced(&mut self, value: Option<&Value<'a>>);
 }
@@ -29,6 +38,8 @@ impl<'a> Recorder<'a> for Discard {
     fn constant(&mut self, _value: &'a str) {}
 
     fn step(&mut self, _op: &'a CompiledOp, _output: Option<&Cow<'a, str>>) {}
+
+    fn step_time(&mut self, _op: &'a CompiledOp, _time: Option<&OffsetDateTime>) {}
 
     fn coerced(&mut self, _value: Option<&Value<'a>>) {}
 }

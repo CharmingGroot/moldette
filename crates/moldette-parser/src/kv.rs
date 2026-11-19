@@ -2,6 +2,7 @@ use std::borrow::Cow;
 
 use moldette_core::{Malformed, SpecError};
 
+use crate::slots::with_slots;
 use crate::text::without_line_break;
 
 const QUOTE: char = '"';
@@ -39,29 +40,46 @@ impl KvKeys {
         })
     }
 
-    pub(crate) fn find<'a>(&self, raw: &'a str) -> Result<Vec<Option<Cow<'a, str>>>, Malformed> {
-        let mut found: Vec<Option<Option<Cow<'a, str>>>> = vec![None; self.keys.len()];
-        let mut rest = without_line_break(raw);
+    pub(crate) fn find<'a>(
+        &self,
+        raw: &'a str,
+        values: &mut [Option<Cow<'a, str>>],
+    ) -> Result<(), Malformed> {
+        with_slots(self.keys.len(), |decided| {
+            self.find_pairs(without_line_break(raw), values, decided)
+        })
+    }
+
+    fn find_pairs<'a>(
+        &self,
+        mut rest: &'a str,
+        values: &mut [Option<Cow<'a, str>>],
+        decided: &mut [Option<()>],
+    ) -> Result<(), Malformed> {
         loop {
             rest = rest.trim_start_matches(self.pair_delimiter);
             if rest.is_empty() {
                 break;
             }
             let (key, value, next) = self.split_pair(rest)?;
-            let mut slots = found
+            let mut slots = values
                 .iter_mut()
+                .zip(decided.iter_mut())
                 .zip(&self.keys)
-                .filter(|(slot, path)| slot.is_none() && *path == key)
-                .map(|(slot, _)| slot);
+                .filter(|((_, decided), path)| decided.is_none() && *path == key)
+                .map(|((slot, decided), _)| {
+                    *decided = Some(());
+                    slot
+                });
             if let Some(first) = slots.next() {
                 for slot in slots {
-                    *slot = Some(value.clone());
+                    *slot = value.clone();
                 }
-                *first = Some(value);
+                *first = value;
             }
             rest = next;
         }
-        Ok(found.into_iter().map(Option::flatten).collect())
+        Ok(())
     }
 
     fn split_pair<'a>(

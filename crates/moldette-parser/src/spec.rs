@@ -4,9 +4,10 @@ use moldette_core::{FieldRecord, Malformed, SpecError, validate_field_names};
 
 use crate::custom::{CustomFormat, CustomPaths, Parser};
 use crate::delimited::DelimitedColumns;
-use crate::json::{self, JsonPaths};
+use crate::json::JsonPaths;
 use crate::kv::KvKeys;
 use crate::regex::RegexGroups;
+use crate::slots::with_slots;
 use crate::telemetry;
 
 /// The format of the raw records a spec parses.
@@ -120,12 +121,24 @@ impl ParserSpec {
         raw: &'t str,
         sink: &mut dyn FnMut(&'s str, Cow<'t, str>),
     ) -> Result<(), Malformed> {
-        let mut values = self
-            .paths
-            .find(raw)
-            .inspect_err(|_| telemetry::malformed(|| self.format.name()))?
-            .into_iter()
-            .map(|value| value.filter(|value| !(self.empty_as_none && value.is_empty())));
+        with_slots(self.fields.len() + self.bodies.len(), |values| {
+            self.paths
+                .find(raw, values)
+                .inspect_err(|_| telemetry::malformed(|| self.format.name()))?;
+            self.emit(values, sink)
+        })
+    }
+
+    fn emit<'s, 't>(
+        &'s self,
+        values: &mut [Option<Cow<'t, str>>],
+        sink: &mut dyn FnMut(&'s str, Cow<'t, str>),
+    ) -> Result<(), Malformed> {
+        let mut values = values.iter_mut().map(|value| {
+            value
+                .take()
+                .filter(|value| !(self.empty_as_none && value.is_empty()))
+        });
         for ((name, _), value) in self.fields.iter().zip(values.by_ref()) {
             if let Some(value) = value {
                 sink(name, value);
@@ -180,17 +193,13 @@ impl Paths {
         })
     }
 
-    fn find<'t>(&self, raw: &'t str) -> Result<Vec<Option<Cow<'t, str>>>, Malformed> {
+    fn find<'t>(&self, raw: &'t str, values: &mut [Option<Cow<'t, str>>]) -> Result<(), Malformed> {
         match self {
-            Self::Json(paths) => paths
-                .find(raw)?
-                .into_iter()
-                .map(|text| text.map(json::field_value).transpose().map(Option::flatten))
-                .collect(),
-            Self::Delimited(columns) => columns.find(raw),
-            Self::Regex(groups) => groups.find(raw),
-            Self::Kv(keys) => keys.find(raw),
-            Self::Custom(paths) => paths.find(raw),
+            Self::Json(paths) => paths.find(raw, values),
+            Self::Delimited(columns) => columns.find(raw, values),
+            Self::Regex(groups) => groups.find(raw, values),
+            Self::Kv(keys) => keys.find(raw, values),
+            Self::Custom(paths) => paths.find(raw, values),
         }
     }
 }
@@ -990,6 +999,34 @@ mod tests {
 
         let record = spec.parse("").expect("valid record");
         assert_eq!(fields(&record), [("order_id", "")]);
+    }
+
+    #[test]
+    fn wide_records_keep_every_field_in_declared_order() {
+        let names: Vec<String> = (0..40).rev().map(|i| format!("c{i}")).collect();
+        let indices: Vec<String> = (0..40).rev().map(|i: usize| i.to_string()).collect();
+        let expected: Vec<(&str, &str)> = names.iter().map(|n| (n.as_str(), n.as_str())).collect();
+        let columns: Vec<(&str, &str)> = names
+            .iter()
+            .zip(&indices)
+            .map(|(name, index)| (name.as_str(), index.as_str()))
+            .collect();
+
+        let raw = (0..40)
+            .map(|i| format!("c{i}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let record_spec = spec(CSV, &columns);
+        let record = record_spec.parse(&raw).expect("valid record");
+        assert_eq!(fields(&record), expected);
+
+        let raw = (0..40)
+            .map(|i| format!("c{i}=c{i}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let record_spec = spec(LOGFMT, &expected);
+        let record = record_spec.parse(&raw).expect("valid record");
+        assert_eq!(fields(&record), expected);
     }
 
     #[test]

@@ -29,19 +29,20 @@ impl RegexGroups {
         Ok(Self { regex, groups })
     }
 
-    pub(crate) fn find<'a>(&self, raw: &'a str) -> Result<Vec<Option<Cow<'a, str>>>, Malformed> {
+    pub(crate) fn find<'a>(
+        &self,
+        raw: &'a str,
+        values: &mut [Option<Cow<'a, str>>],
+    ) -> Result<(), Malformed> {
         let captures = self
             .regex
             .captures(without_line_break(raw))
             .ok_or_else(|| Malformed::new("record does not match the pattern"))?;
-        Ok(self
-            .groups
-            .iter()
-            .map(|&group| {
-                captures
-                    .get(group)
-                    .map(|found| Cow::Borrowed(found.as_str()))
-            })
-            .collect())
+        for (value, &group) in values.iter_mut().zip(&self.groups) {
+            *value = captures
+                .get(group)
+                .map(|found| Cow::Borrowed(found.as_str()));
+        }
+        Ok(())
     }
 }

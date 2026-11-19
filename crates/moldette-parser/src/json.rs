@@ -12,7 +12,6 @@ use crate::text::array_index;
 #[derive(Debug, Clone)]
 pub(crate) struct JsonPaths {
     root: Node,
-    field_count: usize,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -40,33 +39,39 @@ impl JsonPaths {
             }
             node.fields.push(field);
         }
-        Ok(Self {
-            root,
-            field_count: pointers.len(),
-        })
+        Ok(Self { root })
     }
 
-    pub(crate) fn find<'a>(&self, raw: &'a str) -> Result<Vec<Option<&'a str>>, Malformed> {
-        let mut texts = vec![None; self.field_count];
+    pub(crate) fn find<'a>(
+        &self,
+        raw: &'a str,
+        values: &mut [Option<Cow<'a, str>>],
+    ) -> Result<(), Malformed> {
         let mut deserializer = serde_json::Deserializer::from_str(raw);
         deserializer
             .deserialize_map(Walk {
                 node: &self.root,
-                texts: &mut texts,
+                texts: values,
             })
             .and_then(|()| deserializer.end())
             .map_err(malformed)?;
         let document = raw.trim_matches([' ', '\t', '\n', '\r']);
         for &field in &self.root.fields {
-            if let Some(text) = texts.get_mut(field) {
-                *text = Some(document);
+            if let Some(value) = values.get_mut(field) {
+                *value = Some(Cow::Borrowed(document));
             }
         }
-        Ok(texts)
+        for value in values.iter_mut() {
+            *value = match value.take() {
+                Some(Cow::Borrowed(text)) => field_value(text)?,
+                other => other,
+            };
+        }
+        Ok(())
     }
 }
 
-pub(crate) fn field_value(text: &str) -> Result<Option<Cow<'_, str>>, Malformed> {
+fn field_value(text: &str) -> Result<Option<Cow<'_, str>>, Malformed> {
     match text.strip_prefix('"').and_then(|s| s.strip_suffix('"')) {
         Some(content) if !content.contains('\\') => Ok(Some(Cow::Borrowed(content))),
         Some(_) => serde_json::from_str::<String>(text)
@@ -131,7 +136,7 @@ impl Node {
 
 struct Walk<'s, 'a> {
     node: &'s Node,
-    texts: &'s mut [Option<&'a str>],
+    texts: &'s mut [Option<Cow<'a, str>>],
 }
 
 impl<'a> Walk<'_, 'a> {
@@ -139,7 +144,7 @@ impl<'a> Walk<'_, 'a> {
         let text = value.get();
         for &field in &node.fields {
             if let Some(slot) = self.texts.get_mut(field) {
-                slot.get_or_insert(text);
+                slot.get_or_insert(Cow::Borrowed(text));
             }
         }
         if node.children.is_empty() {
