@@ -156,6 +156,7 @@ impl<'a> ExplainRead<'a> {
 
 /// Where a read takes its text from.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ExplainSource<'a> {
     Field(Cow<'a, str>),
     Constant,

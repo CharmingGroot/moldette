@@ -24,5 +24,7 @@ pub use moldette_mapper as mapper;
 pub use moldette_parser as parser;
 #[cfg(feature = "resp")]
 pub use moldette_resp as resp;
+#[cfg(feature = "config")]
+pub use pipeline::MissingSectionError;
 #[cfg(all(feature = "parser", feature = "mapper", feature = "resp"))]
 pub use pipeline::Pipeline;

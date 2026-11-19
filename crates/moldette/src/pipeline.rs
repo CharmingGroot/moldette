@@ -1,4 +1,7 @@
 #[cfg(feature = "config")]
+use std::fmt;
+
+#[cfg(feature = "config")]
 use moldette_config::Specs;
 use moldette_core::{Explain, Malformed, Response, StatusCounts};
 use moldette_mapper::MapperSpec;
@@ -28,15 +31,25 @@ impl Pipeline {
     }
 
     /// Copies the parser, mapper and resp specs of `specs`, which have passed
-    /// the cross-layer checks of `Config::build`. Returns `None` when one of
-    /// the three sections is missing.
+    /// the cross-layer checks of `Config::build`. Fails with every section of
+    /// the three that is missing (#66).
     #[cfg(feature = "config")]
-    pub fn from_specs(specs: &Specs) -> Option<Self> {
-        Some(Self::new(
-            specs.parser()?.clone(),
-            specs.mapper()?.clone(),
-            specs.resp()?.clone(),
-        ))
+    pub fn from_specs(specs: &Specs) -> Result<Self, MissingSectionError> {
+        match (specs.parser(), specs.mapper(), specs.resp()) {
+            (Some(parser), Some(mapper), Some(resp)) => {
+                Ok(Self::new(parser.clone(), mapper.clone(), resp.clone()))
+            }
+            (parser, mapper, resp) => Err(MissingSectionError {
+                sections: [
+                    ("parser", parser.is_none()),
+                    ("mapper", mapper.is_none()),
+                    ("resp", resp.is_none()),
+                ]
+                .into_iter()
+                .filter_map(|(section, missing)| missing.then_some(section))
+                .collect(),
+            }),
+        }
     }
 
     /// Parses, maps and responds to one raw record. A record the parser cannot
@@ -91,6 +104,35 @@ impl Pipeline {
     }
 }
 
+/// The configuration sections that [`Pipeline::from_specs`] needs and the
+/// specs lack, named by their configuration keys.
+#[cfg(feature = "config")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MissingSectionError {
+    sections: Vec<&'static str>,
+}
+
+#[cfg(feature = "config")]
+impl MissingSectionError {
+    pub fn sections(&self) -> &[&'static str] {
+        &self.sections
+    }
+}
+
+#[cfg(feature = "config")]
+impl fmt::Display for MissingSectionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "configuration has no {} section",
+            self.sections.join(", ")
+        )
+    }
+}
+
+#[cfg(feature = "config")]
+impl std::error::Error for MissingSectionError {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -100,5 +142,7 @@ mod tests {
     #[test]
     fn public_types_are_send_and_sync() {
         assert_send_sync::<Pipeline>();
+        #[cfg(feature = "config")]
+        assert_send_sync::<MissingSectionError>();
     }
 }

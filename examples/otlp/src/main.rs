@@ -59,7 +59,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 fn run() -> Result<(), Box<dyn Error>> {
     let specs = Config::from_yaml(ACCESS_LOG)?.build(&Registry::new())?;
-    let pipeline = Pipeline::from_specs(&specs).ok_or("the configuration lacks a layer")?;
+    let pipeline = Pipeline::from_specs(&specs)?;
     let (_, counts) = pipeline.process_batch(LINES);
     println!(
         "ok {}, malformed {}, missing required {}, emptied {}",
