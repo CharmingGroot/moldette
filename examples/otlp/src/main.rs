@@ -14,7 +14,8 @@
 //! cargo run -p moldette-otlp-example
 //! ```
 //!
-//! Without a collector the export fails and the example still exits normally.
+//! Without a collector the export fails silently: the SDK reports no error to
+//! the caller, and the example still exits normally.
 
 use std::error::Error;
 
