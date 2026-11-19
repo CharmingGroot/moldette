@@ -8,8 +8,10 @@
 
 mod allocations;
 mod case;
+mod threads;
 mod workload;
 
 pub use allocations::{CountingAllocator, allocations, per_input};
-pub use case::{Case, cases};
+pub use case::{Case, cases, thread_case};
+pub use threads::{THREADS, on_threads};
 pub use workload::{BATCHES, Size, Workload, batch, borrowed, same_fields, same_mapped};
