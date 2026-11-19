@@ -1,6 +1,8 @@
 //! Parser specs of the benchmark workloads, built with the parser builder only.
 
-use moldette_bench_support::Workload;
+use std::hint::black_box;
+
+use moldette_bench_support::{BATCHES, Workload, cases, per_input};
 use moldette_parser::{Format, ParserSpec};
 
 const ACCESS_LOG_PATTERN: &str = r#"^(?P<remote_addr>\S+) \S+ \S+ \[(?P<time_local>[^\]]+)\] "(?P<method>\S+) (?P<uri>\S+) (?P<protocol>[^"]+)" (?P<status>\d{3}) (?P<bytes>\d+|-) "(?P<referer>[^"]*)" "(?P<agent>[^"]*)" "(?P<forwarded_for>[^"]*)"$"#;
@@ -83,6 +85,27 @@ pub fn parser_spec(workload: Workload) -> ParserSpec {
         builder
     };
     builder.build().expect("valid parser spec")
+}
+
+/// Mean allocations per record of each case, at most the first batch size,
+/// as `<layer>/<format>/<case>` and a count rounded to two decimals. Counts
+/// are zero unless the calling binary uses `CountingAllocator` (#64).
+pub fn allocations_per_record() -> Vec<String> {
+    let mut rows = Vec::new();
+    for workload in Workload::ALL {
+        let spec = parser_spec(workload);
+        for case in cases(workload, &BATCHES[..1], |i, size| workload.raw(i, size)) {
+            let count = per_input(&case.inputs, |raw| {
+                let _ = black_box(spec.parse(raw));
+            });
+            rows.push(format!(
+                "parser/{}/{} {count:.2}",
+                workload.format(),
+                case.name
+            ));
+        }
+    }
+    rows
 }
 
 #[cfg(test)]

@@ -17,7 +17,7 @@ fn process(c: &mut Criterion) {
     for workload in Workload::ALL {
         let pipeline = pipeline(workload);
         let mut group = c.benchmark_group(format!("pipeline/{}", workload.format()));
-        let cases = cases(workload, |i, size| workload.raw(i, size));
+        let cases = cases(workload, &BATCHES, |i, size| workload.raw(i, size));
         for case in &cases {
             group.throughput(Throughput::ElementsAndBytes {
                 elements: case.inputs.len() as u64,
