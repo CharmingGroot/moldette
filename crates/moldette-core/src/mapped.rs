@@ -16,6 +16,15 @@ impl<'a> Mapped<'a> {
         Self::default()
     }
 
+    /// Reserves room for `capacity` values, so that a mapper that knows the
+    /// number of schema fields inserts them without growing (#66).
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            values: Vec::with_capacity(capacity),
+            emptied: Vec::new(),
+        }
+    }
+
     pub fn insert(&mut self, name: impl Into<Cow<'a, str>>, value: Value<'a>) {
         self.values.push((name.into(), value));
     }
@@ -64,5 +73,12 @@ mod tests {
         assert_eq!(mapped.get("amount"), Some(&Value::Float(12.5)));
         assert_eq!(mapped.get("ordered_at"), None);
         assert_eq!(mapped.emptied().collect::<Vec<_>>(), ["ordered_at"]);
+    }
+
+    #[test]
+    fn with_capacity_starts_empty() {
+        let mapped = Mapped::with_capacity(8);
+        assert_eq!(mapped, Mapped::new());
+        assert_eq!(mapped.iter().count(), 0);
     }
 }
