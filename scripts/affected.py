@@ -6,8 +6,8 @@ and a crate that depends on it through another crate is compiled (check).
 A change to core, to a shared kernel module or to a crate root counts as a
 change to every module of that crate, and core runs every crate that uses it
 in full. A `Cargo.lock` change runs in full the crates whose resolved
-dependency tree changed. A crate under `examples/` skips the wasm32 build and,
-unless it changed itself, is only compiled.
+dependency tree changed. A crate under `examples/` or `benches/` skips the
+wasm32 build and, unless it changed itself, is only compiled.
 
 Usage: affected.py BASE_REF HEAD_REF
        affected.py --full
@@ -42,7 +42,7 @@ LOWERING_CRATE = "moldette-config"
 FACADE_CRATE = "moldette"
 FORMAT_CRATE = "moldette-parser"
 TEST_TRACING_CRATE = "moldette-test-tracing"
-EXAMPLES_DIR = "examples/"
+HOST_ONLY_DIRS = ("examples/", "benches/")
 LOWERING_TESTS = "--test lowering"
 E2E_TESTS = "--test e2e"
 TRACING_TESTS = "--test tracing --features tracing"
@@ -77,8 +77,8 @@ class Workspace:
                     pending.append(dependent)
         return found
 
-    def is_example(self, crate: str) -> bool:
-        return self.dirs[crate].startswith(EXAMPLES_DIR)
+    def is_host_only(self, crate: str) -> bool:
+        return (self.dirs[crate] + "/").startswith(HOST_ONLY_DIRS)
 
 
 def is_full_path(path: str) -> bool:
@@ -153,7 +153,7 @@ def matrix(scopes: dict[str, str], tests: dict[str, dict[str, Filters]],
            workspace: Workspace) -> list[dict]:
     return [{"crate": crate, "scope": scope,
              "tests": render_tests(tests[crate]) if scope == "edge" else [],
-             "wasm": not workspace.is_example(crate)}
+             "wasm": not workspace.is_host_only(crate)}
             for crate, scope in sorted(scopes.items())]
 
 
@@ -186,7 +186,7 @@ def plan(files: list[str], workspace: Workspace, graphs: dict[str, Graph],
                 for indirect in workspace.users(dependent, dev=False):
                     raise_scope(scopes, indirect, "check")
     for crate in scopes:
-        if workspace.is_example(crate) and crate not in changes and crate not in lock_changed:
+        if workspace.is_host_only(crate) and crate not in changes and crate not in lock_changed:
             scopes[crate] = "check"
     return matrix(scopes, tests, workspace)
 
