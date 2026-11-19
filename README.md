@@ -74,9 +74,10 @@ collector.
 
 ## Status
 
-moldette is at version 0.x and has not been published to crates.io yet. The
-public API may change between minor versions until the core contracts are
-stable. The scope, layers and milestones are described in `docs/PLAN.md`.
+moldette is at version 0.x and has not been published to crates.io yet. It
+requires Rust 1.88 or later. The public API may change between minor versions
+until the core contracts are stable. The scope, layers and milestones are
+described in `docs/PLAN.md`.
 
 ## Contributing
 

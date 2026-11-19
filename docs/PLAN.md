@@ -81,6 +81,7 @@ expression language (#4).
 | observability | library crates emit `tracing` signals only; exporters belong to the caller | #7 |
 | portability | no I/O, no global state; every crate builds for `wasm32-unknown-unknown` | #2 |
 | CI | each affected crate checked on its own | #9 |
+| toolchain | library crates declare `rust-version`, checked in CI | #78 |
 | publishing | crates stay unpublished until the first public release | #10 |
 
 ## Milestones

@@ -3,13 +3,15 @@ name = "moldette-parser"
 version.workspace = true
 description = "Parses one raw record into named text fields"
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-# Kept unpublished until the first public release (#10).
-publish = false
+readme.workspace = true
+keywords = ["parser", "csv", "json", "regex", "etl"]
+categories = ["parser-implementations", "text-processing"]
 
 [dependencies]
-moldette-core = { path = "../moldette-core" }
+moldette-core = { workspace = true }
 regex = "1.13.1"
 serde = "1.0.229"
 serde_json = { version = "1.0.154", features = ["raw_value"] }
@@ -21,3 +23,6 @@ tracing = { workspace = true }
 
 [features]
 tracing = ["dep:tracing"]
+
+[package.metadata.docs.rs]
+all-features = true
