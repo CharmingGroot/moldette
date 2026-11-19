@@ -3,7 +3,9 @@ name = "moldette-core"
 version.workspace = true
 description = "Contract types shared by moldette layers"
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-# Kept unpublished until the first public release (#10).
-publish = false
+readme.workspace = true
+keywords = ["etl", "schema", "records"]
+categories = ["data-structures"]

@@ -5,8 +5,15 @@ resolver = "3"
 [workspace.package]
 version = "0.2.0"
 edition = "2024"
+rust-version = "1.88"
+readme = "README.md"
 license = "Apache-2.0"
 repository = "https://github.com/CharmingGroot/moldette"
 
 [workspace.dependencies]
+moldette-config = { path = "crates/moldette-config", version = "0.2.0" }
+moldette-core = { path = "crates/moldette-core", version = "0.2.0" }
+moldette-mapper = { path = "crates/moldette-mapper", version = "0.2.0" }
+moldette-parser = { path = "crates/moldette-parser", version = "0.2.0" }
+moldette-resp = { path = "crates/moldette-resp", version = "0.2.0" }
 tracing = { version = "0.1.44", default-features = false }

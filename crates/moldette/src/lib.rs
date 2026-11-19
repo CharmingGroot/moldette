@@ -11,6 +11,37 @@
 //! selected. The pipeline emits no signals of its own: in a batch, the parser
 //! and mapper spans of each record are children of the
 //! `moldette.resp.respond_batch` span (#7).
+//!
+//! ```
+//! # #[cfg(feature = "config")]
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! use moldette::config::{Config, Registry};
+//! use moldette::{Pipeline, Response};
+//!
+//! let yaml = r#"
+//! schemas:
+//!   - name: order
+//!     version: 1
+//!     fields:
+//!       - {name: id, type: string, required: true}
+//!       - {name: total, type: float}
+//! parser:
+//!   format: json
+//!   fields: {id: /id, total: /total}
+//! mapper:
+//!   schema: {name: order, version: 1}
+//! resp:
+//!   schema: {name: order, version: 1}
+//! "#;
+//! let specs = Config::from_yaml(yaml)?.build(&Registry::new())?;
+//! let pipeline = Pipeline::from_specs(&specs)?;
+//! let response = pipeline.process(r#"{"id": "A-1", "total": 25.5}"#);
+//! assert!(matches!(response, Response::Ok(_)));
+//! # Ok(())
+//! # }
+//! # #[cfg(not(feature = "config"))]
+//! # fn main() {}
+//! ```
 
 #[cfg(all(feature = "parser", feature = "mapper", feature = "resp"))]
 mod pipeline;

@@ -122,6 +122,26 @@ jobs:
       - if: matrix.scope == 'edge' && matrix.wasm
         run: cargo check -p "$CRATE" --target wasm32-unknown-unknown --all-features
 
+  # The library crates build on the `rust-version` of the workspace; see #78.
+  msrv:
+    needs: changes
+    if: needs.changes.outputs.matrix != '[]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: msrv
+        run: echo "version=$(sed -n 's/^rust-version = "\(.*\)"$/\1/p' Cargo.toml)" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master 2026-11-15
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: msrv
+      - run: |
+          mapfile -t crates < <(cargo metadata --format-version 1 --no-deps |
+            jq -r '.packages[] | select(.rust_version != null) | "--package=" + .name')
+          cargo check --locked --all-features "${crates[@]}"
+
   deny:
     needs: changes
     if: needs.changes.outputs.deny == 'true'
@@ -132,7 +152,7 @@ jobs:
 
   # Single required check; see #9.
   ci-ok:
-    needs: [changes, fmt, scripts, crate, deny]
+    needs: [changes, fmt, scripts, crate, msrv, deny]
     if: always()
     runs-on: ubuntu-latest
     steps:

@@ -3,13 +3,15 @@ name = "moldette-mapper"
 version.workspace = true
 description = "Maps parsed fields onto a declared output schema"
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-# Kept unpublished until the first public release (#10).
-publish = false
+readme.workspace = true
+keywords = ["etl", "schema", "mapping", "coercion"]
+categories = ["encoding", "text-processing"]
 
 [dependencies]
-moldette-core = { path = "../moldette-core" }
+moldette-core = { workspace = true }
 regex = "1.13.1"
 time = { version = "0.3.55", default-features = false, features = ["formatting", "parsing"] }
 tracing = { workspace = true, optional = true }
@@ -20,3 +22,6 @@ tracing = { workspace = true }
 
 [features]
 tracing = ["dep:tracing"]
+
+[package.metadata.docs.rs]
+all-features = true
