@@ -151,14 +151,22 @@ use core types only. M0 to M5 make up v0.1 (tag `v0.1.0`).
 4. allocations per record checked in CI (#64)
 5. public API review before the first public release (#66)
 
-## After v0.2
+### v0.3 first public release
+
+1. README in plain text, without images or badges
+2. crate docs and metadata (`keywords`, `categories`, `readme`, `rust-version`); `publish = false` removed from the library crates
+3. `CONTRIBUTING.md`, issue and pull request templates, code of conduct (#12)
+4. repository settings: branch protection, private vulnerability reporting, OpenSSF Scorecard
+5. crates.io release 0.3.0 in dependency order and public repository, each confirmed by the maintainer first (#10)
+
+## After v0.3
 
 | Item | Content |
 |---|---|
 | CLI | `check`, `run`, `explain` |
 | Parallel batch | optional `rayon` feature |
 | Ports | sidecar (HTTP / gRPC, OTLP export), JVM (UniFFI or WASM on Chicory), Python (PyO3), sandboxed WASM user ops |
-| Supply chain | OpenSSF Scorecard and Best Practices badge at the first public release; artifact attestations at the first binary release |
+| Supply chain | artifact attestations at the first binary release |
 
 ## Workflow
 
