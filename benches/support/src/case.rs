@@ -33,3 +33,13 @@ pub fn cases<T>(workload: Workload, input: impl Fn(usize, Size) -> T) -> Vec<Cas
     });
     records.chain(batches).collect()
 }
+
+/// The case that each thread of a scaling case runs: the batch of the first
+/// size in `BATCHES`.
+pub fn thread_case<T>(cases: &[Case<T>]) -> &Case<T> {
+    let (label, _) = BATCHES[0];
+    cases
+        .iter()
+        .find(|case| case.name == format!("batch/{label}"))
+        .expect("cases include every batch size")
+}

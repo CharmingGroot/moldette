@@ -1,12 +1,10 @@
 use std::hint::black_box;
-use std::thread;
+use std::iter;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use moldette::Pipeline;
 use moldette_bench_pipeline::pipeline;
-use moldette_bench_support::{BATCHES, Workload, batch, cases};
-
-const THREADS: [usize; 4] = [1, 2, 4, 8];
+use moldette_bench_support::{BATCHES, THREADS, Workload, cases, on_threads, thread_case};
 
 fn process_all(pipeline: &Pipeline, records: &[String]) {
     for raw in records {
@@ -15,10 +13,12 @@ fn process_all(pipeline: &Pipeline, records: &[String]) {
 }
 
 fn process(c: &mut Criterion) {
+    let (label, _) = BATCHES[0];
     for workload in Workload::ALL {
         let pipeline = pipeline(workload);
         let mut group = c.benchmark_group(format!("pipeline/{}", workload.format()));
-        for case in cases(workload, |i, size| workload.raw(i, size)) {
+        let cases = cases(workload, |i, size| workload.raw(i, size));
+        for case in &cases {
             group.throughput(Throughput::ElementsAndBytes {
                 elements: case.inputs.len() as u64,
                 bytes: case.raw_bytes,
@@ -36,24 +36,20 @@ fn process(c: &mut Criterion) {
                 });
             }
         }
-        let (label, bytes) = BATCHES[0];
-        let records = batch(workload, bytes);
-        let raw_bytes: u64 = records.iter().map(|raw| raw.len() as u64).sum();
+        let case = thread_case(&cases);
         group.sample_size(10);
         for threads in THREADS {
             group.throughput(Throughput::ElementsAndBytes {
-                elements: (records.len() * threads) as u64,
-                bytes: raw_bytes * threads as u64,
+                elements: (case.inputs.len() * threads) as u64,
+                bytes: case.raw_bytes * threads as u64,
             });
             group.bench_with_input(
                 BenchmarkId::new(format!("threads/{label}_each"), threads),
                 &threads,
                 |b, &threads| {
                     b.iter(|| {
-                        thread::scope(|scope| {
-                            for _ in 0..threads {
-                                scope.spawn(|| process_all(&pipeline, &records));
-                            }
+                        on_threads(iter::repeat_n(&case.inputs, threads), |records| {
+                            process_all(&pipeline, records)
                         })
                     })
                 },
