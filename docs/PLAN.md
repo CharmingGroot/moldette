@@ -82,13 +82,13 @@ expression language (#4).
 | portability | no I/O, no global state; every crate builds for `wasm32-unknown-unknown` | #2 |
 | CI | each affected crate checked on its own | #9 |
 | toolchain | library crates declare `rust-version`, checked in CI | #78 |
-| publishing | crates stay unpublished until the first public release | #10 |
+| publishing | crates published from 0.3.0 on, in dependency order | #10 |
 
 ## Milestones
 
 Each layer milestone starts with its standalone API and ends with tests that
 use core types only. M0 to M5 make up v0.1 (tag `v0.1.0`); the v0.2
-improvements are tagged `v0.2.0`.
+improvements are tagged `v0.2.0` and the first public release `v0.3.0`.
 
 ### M0 core
 

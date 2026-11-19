@@ -72,12 +72,19 @@ access log are in `crates/moldette-config/tests/fixtures`. The
 `examples/otlp` program sends the spans of a pipeline to an OpenTelemetry
 collector.
 
+## Installation
+
+    cargo add moldette
+
+The default `config` feature turns on every layer. To use one layer without
+configuration files, depend on its crate, such as `moldette-parser`, or turn
+off the default features and select the layer feature.
+
 ## Status
 
-moldette is at version 0.x and has not been published to crates.io yet. It
-requires Rust 1.88 or later. The public API may change between minor versions
-until the core contracts are stable. The scope, layers and milestones are
-described in `docs/PLAN.md`.
+moldette is at version 0.x and requires Rust 1.88 or later. The public API may
+change between minor versions until the core contracts are stable. The scope,
+layers and milestones are described in `docs/PLAN.md`.
 
 ## Contributing
 
