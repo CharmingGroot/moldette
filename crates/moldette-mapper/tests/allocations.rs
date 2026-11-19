@@ -117,7 +117,7 @@ fn map_allocates_only_for_its_output_when_ops_borrow() {
     for record in &records {
         let (mapped, mapping) = allocations(|| spec.map(record));
         let (_, rebuilding) = allocations(|| {
-            let mut rebuilt = Mapped::new();
+            let mut rebuilt = Mapped::with_capacity(spec.schema().fields().len());
             for (name, value) in mapped.iter() {
                 rebuilt.insert(name, value.clone());
             }

@@ -48,7 +48,7 @@ impl MapperSpec {
         recorder: &mut R,
     ) -> Mapped<'a> {
         telemetry::map_span(&self.schema).in_scope(|| {
-            let mut mapped = Mapped::new();
+            let mut mapped = Mapped::with_capacity(self.schema.fields().len());
             for (field, rule) in self.schema.fields().iter().zip(&self.rules) {
                 match rule {
                     Some(rule) => rule.run(field, record, &mut mapped, recorder),
