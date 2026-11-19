@@ -80,6 +80,7 @@ impl fmt::Display for Diagnostic {
 
 /// Whether a diagnostic fails [`Config::build`](crate::Config::build).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Severity {
     Error,
     Warning,

@@ -124,42 +124,49 @@ impl LineagePath {
 
 type Origins<'c> = Vec<(&'c str, Vec<LineagePath>)>;
 
-pub(crate) fn lineage(config: &Config) -> Option<Lineage> {
-    let section = config.mapper.as_ref()?;
-    let schema = config.schemas.iter().find(|entry| {
-        entry.name == section.schema.name && entry.version == section.schema.version
-    })?;
-    let origins = config
-        .parser
-        .as_ref()
-        .map(|parser| parser_origins(parser, &[]))
-        .unwrap_or_default();
-    let fields = schema
-        .fields
-        .iter()
-        .map(
-            |field| match section.rules.iter().find(|rule| rule.target == field.name) {
-                Some(rule) => rule_lineage(rule, &origins),
-                None if section.explicit_rules => LineageField {
-                    name: field.name.clone(),
-                    source: LineageSource::Absent,
-                    reads: Vec::new(),
-                    ops: Vec::new(),
+impl Config {
+    /// The lineage of the mapper's output schema, computed from the model
+    /// alone like [`Config::check`], without a [`Registry`](crate::Registry):
+    /// caller-defined ops and formats appear by their configured names. The
+    /// model is not validated; `None` without a mapper section or when it names
+    /// an undefined schema (#66).
+    pub fn lineage(&self) -> Option<Lineage> {
+        let section = self.mapper.as_ref()?;
+        let schema = self.schemas.iter().find(|entry| {
+            entry.name == section.schema.name && entry.version == section.schema.version
+        })?;
+        let origins = self
+            .parser
+            .as_ref()
+            .map(|parser| parser_origins(parser, &[]))
+            .unwrap_or_default();
+        let fields = schema
+            .fields
+            .iter()
+            .map(
+                |field| match section.rules.iter().find(|rule| rule.target == field.name) {
+                    Some(rule) => rule_lineage(rule, &origins),
+                    None if section.explicit_rules => LineageField {
+                        name: field.name.clone(),
+                        source: LineageSource::Absent,
+                        reads: Vec::new(),
+                        ops: Vec::new(),
+                    },
+                    None => LineageField {
+                        name: field.name.clone(),
+                        source: LineageSource::SameName,
+                        reads: vec![read(&field.name, false, &origins)],
+                        ops: Vec::new(),
+                    },
                 },
-                None => LineageField {
-                    name: field.name.clone(),
-                    source: LineageSource::SameName,
-                    reads: vec![read(&field.name, false, &origins)],
-                    ops: Vec::new(),
-                },
-            },
-        )
-        .collect();
-    Some(Lineage {
-        schema: schema.name.clone(),
-        version: schema.version,
-        fields,
-    })
+            )
+            .collect();
+        Some(Lineage {
+            schema: schema.name.clone(),
+            version: schema.version,
+            fields,
+        })
+    }
 }
 
 fn parser_origins<'c>(section: &'c ParserSection, enclosing: &[LineagePath]) -> Origins<'c> {

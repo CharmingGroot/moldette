@@ -254,11 +254,14 @@ mod regex {
     #[test]
     fn needs_parser_mapper_and_resp_sections() {
         let (without_resp, _) = ACCESS_LOG_YAML.split_once("\nresp:").expect("resp section");
-        assert!(Pipeline::from_specs(&specs(without_resp)).is_none());
+        let missing = Pipeline::from_specs(&specs(without_resp)).expect_err("no resp section");
+        assert_eq!(missing.sections(), ["resp"]);
+        assert_eq!(missing.to_string(), "configuration has no resp section");
 
         let parser_only =
             "parser: {format: kv, pair_delimiter: ' ', key_value_delimiter: '=', fields: {id: id}}";
-        assert!(Pipeline::from_specs(&specs(parser_only)).is_none());
+        let missing = Pipeline::from_specs(&specs(parser_only)).expect_err("parser only");
+        assert_eq!(missing.sections(), ["mapper", "resp"]);
     }
 
     #[test]

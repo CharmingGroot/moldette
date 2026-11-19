@@ -7,7 +7,7 @@ use crate::diagnostic::Report;
 use crate::digest::digest;
 use crate::error::{LoadError, LoadErrorKind};
 use crate::fields::{body_path, parser_field_names};
-use crate::lineage::{Lineage, lineage};
+use crate::lineage::Lineage;
 use crate::model::{
     Config, FieldEntry, FormatEntry, MapperSection, OpEntry, ParserSection, RespSection, RuleEntry,
     SchemaEntry, SchemaRef, SourceEntry,
@@ -101,7 +101,7 @@ impl Config {
             mapper,
             resp,
             report,
-            lineage: lineage(self),
+            lineage: self.lineage(),
         })
     }
 }

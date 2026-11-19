@@ -225,6 +225,14 @@ fn traces_caller_defined_ops_and_formats_by_their_configured_names() {
 }
 
 #[test]
+fn traces_from_the_configuration_without_a_registry() {
+    let config = Config::from_yaml(FIXED_ORDERS).expect("valid YAML");
+    let built = lineage_yaml(FIXED_ORDERS, &registry());
+    assert_eq!(config.lineage(), Some(built));
+    assert!(config.build(&Registry::new()).is_err());
+}
+
+#[test]
 fn traces_only_with_a_mapper_section() {
     let without_mapper = format!("{ORDER_SCHEMA}parser: {{format: json, fields: {{id: /id}}}}\n");
     let specs = build_yaml(&without_mapper, &Registry::new()).expect("specs are built");
