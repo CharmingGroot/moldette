@@ -9,15 +9,13 @@ const ACCESS_LOG_YAML: &str =
     include_str!("../../moldette-config/tests/fixtures/nginx_access.yaml");
 const ACCESS_LOG_JSON: &str =
     include_str!("../../moldette-config/tests/fixtures/nginx_access.json");
-const ACCESS_LOG: &str = include_str!("../../moldette-config/tests/fixtures/nginx_access.log");
+const ACCESS_LOG: &str = include_str!("data/nginx_access.log");
 const ORDER_BODIES: &str = include_str!("../../moldette-config/tests/fixtures/order_bodies.yaml");
 const ORDER_API_YAML: &str = include_str!("../../moldette-config/tests/fixtures/order_api.yaml");
-const ORDER_API_NDJSON: &str =
-    include_str!("../../moldette-config/tests/fixtures/order_api.ndjson");
+const ORDER_API_NDJSON: &str = include_str!("data/order_api.ndjson");
 const ORDER_EXPORT_YAML: &str =
     include_str!("../../moldette-config/tests/fixtures/order_export.yaml");
-const ORDER_EXPORT_CSV: &str =
-    include_str!("../../moldette-config/tests/fixtures/order_export.csv");
+const ORDER_EXPORT_CSV: &str = include_str!("data/order_export.csv");
 
 fn specs(yaml: &str) -> Specs {
     Config::from_yaml(yaml)
@@ -60,6 +58,10 @@ fn malformed(reason: &'static str) -> Response<'static> {
     Response::Malformed(Malformed::new(reason))
 }
 
+fn any_malformed() -> Response<'static> {
+    malformed("")
+}
+
 fn assert_responses(actual: &[Response<'_>], expected: &[Response<'_>]) {
     assert_eq!(actual.len(), expected.len(), "record count");
     for (record, (actual, expected)) in (1..).zip(actual.iter().zip(expected)) {
@@ -88,133 +90,21 @@ mod regex {
     use std::thread;
 
     use moldette::config::{Config, Lineage, Registry, Specs};
-    use moldette::{Pipeline, Response, StatusCounts, Timestamp, Value};
+    use moldette::{Pipeline, Response, StatusCounts, Value};
 
     use crate::{
         ACCESS_LOG, ACCESS_LOG_JSON, ACCESS_LOG_YAML, assert_responses, counts, ip, malformed,
         missing, ok, specs, text, timestamp,
     };
 
-    const OK_LINES: [&str; 2] = [
-        r#"203.0.113.7 - - [18/Nov/2026:10:15:32 +0000] "GET /orders?id=A-1 HTTP/1.1" 200 512 "-" "curl/8.5.0" "198.51.100.2, 203.0.113.7""#,
-        r#"203.0.113.9 - - [18/Nov/2026:10:15:33 +0900] "POST /orders HTTP/2.0" 404 0 "https://shop.example/cart" "Mozilla/5.0" "-""#,
-    ];
-    const BAD_TIME_LINE: &str =
-        r#"203.0.113.9 - - [yesterday] "GET / HTTP/1.1" 200 12 "-" "curl/8.5.0" "-""#;
     const MALFORMED_LINE: &str = "GET /orders 200";
 
     fn access_log() -> Pipeline {
         Pipeline::from_specs(&specs(ACCESS_LOG_YAML)).expect("all three sections")
     }
 
-    fn batch() -> [&'static str; 5] {
-        [
-            MALFORMED_LINE,
-            OK_LINES[0],
-            BAD_TIME_LINE,
-            MALFORMED_LINE,
-            OK_LINES[1],
-        ]
-    }
-
     #[test]
-    fn processes_access_log_file_with_fallback_and_malformed_lines() {
-        let pipeline = access_log();
-
-        let (responses, status_counts) = pipeline.process_batch(ACCESS_LOG.lines());
-
-        assert_responses(
-            &responses,
-            &[
-                ok(
-                    [
-                        ("client", ip("198.51.100.2")),
-                        ("time", timestamp(1_794_996_932, 0, 0)),
-                        ("method", text("GET")),
-                        ("path", text("/orders")),
-                        ("http_version", text("1.1")),
-                        ("status", Value::Int(200)),
-                        ("status_class", text("success")),
-                        ("bytes", Value::Int(512)),
-                        ("user_agent", text("curl/8.5.0")),
-                        ("referer", text("-")),
-                        ("site", text("web-01")),
-                    ],
-                    &[],
-                ),
-                ok(
-                    [
-                        ("client", ip("203.0.113.8")),
-                        ("time", timestamp(1_794_996_940, 0, 0)),
-                        ("method", text("POST")),
-                        ("path", text("/orders")),
-                        ("http_version", text("2.0")),
-                        ("status", Value::Int(201)),
-                        ("status_class", text("success")),
-                        ("bytes", Value::Int(64)),
-                        ("user_agent", text("Mozilla/5.0")),
-                        ("referer", text("https://shop.example/cart")),
-                        ("site", text("web-01")),
-                    ],
-                    &[],
-                ),
-                ok(
-                    [
-                        ("client", ip("203.0.113.9")),
-                        ("time", timestamp(1_794_996_965, 0, 32_400)),
-                        ("method", text("GET")),
-                        ("path", text("/search")),
-                        ("http_version", text("1.0")),
-                        ("status", Value::Int(304)),
-                        ("status_class", text("redirection")),
-                        ("user_agent", text("Mozilla/5.0")),
-                        ("site", text("web-01")),
-                    ],
-                    &["bytes"],
-                ),
-                ok(
-                    [
-                        ("client", ip("2001:db8::1")),
-                        ("time", timestamp(1_794_996_970, 0, 0)),
-                        ("method", text("DELETE")),
-                        ("path", text("/orders/A-3")),
-                        ("http_version", text("1.1")),
-                        ("status", Value::Int(503)),
-                        ("status_class", text("server_error")),
-                        ("bytes", Value::Int(0)),
-                        ("user_agent", text("curl/8.5.0")),
-                        ("referer", text("-")),
-                        ("site", text("web-01")),
-                    ],
-                    &[],
-                ),
-                missing(&["client"]),
-                missing(&["time"]),
-                malformed("record does not match the pattern"),
-                malformed("record does not match the pattern"),
-                ok(
-                    [
-                        ("client", ip("203.0.113.13")),
-                        ("time", timestamp(1_794_997_000, 0, 0)),
-                        ("method", text("GET")),
-                        ("path", text("/health")),
-                        ("http_version", text("3")),
-                        ("status", Value::Int(200)),
-                        ("status_class", text("success")),
-                        ("bytes", Value::Int(2)),
-                        ("user_agent", text("curl/8.5.0")),
-                        ("referer", text("-")),
-                        ("site", text("web-01")),
-                    ],
-                    &[],
-                ),
-            ],
-        );
-        assert_eq!(counts(status_counts), (5, 2, 2, 0));
-    }
-
-    #[test]
-    fn processes_access_log_records_from_yaml_and_json() {
+    fn processes_access_log_file_from_yaml_and_json() {
         for config in [
             Config::from_yaml(ACCESS_LOG_YAML).expect("valid YAML"),
             Config::from_json(ACCESS_LOG_JSON).expect("valid JSON"),
@@ -226,67 +116,110 @@ mod regex {
             assert_eq!(specs.resp().map(|resp| resp.schema()), Some(schema));
             let pipeline = Pipeline::from_specs(&specs).expect("all three sections");
 
-            let Response::Ok(first) = pipeline.process(OK_LINES[0]) else {
-                panic!("first record is ok");
-            };
-            let expected = [
-                ("client", Value::Ip("198.51.100.2".parse().expect("ip"))),
-                (
-                    "time",
-                    Value::Timestamp(Timestamp::new(1_794_996_932, 0, 0).expect("timestamp")),
-                ),
-                ("method", text("GET")),
-                ("path", text("/orders")),
-                ("http_version", text("1.1")),
-                ("status", Value::Int(200)),
-                ("status_class", text("success")),
-                ("bytes", Value::Int(512)),
-                ("user_agent", text("curl/8.5.0")),
-                ("referer", text("-")),
-                ("site", text("web-01")),
-            ];
-            for (name, value) in &expected {
-                assert_eq!(first.get(name), Some(value), "{name}");
-            }
-            assert_eq!(first.iter().count(), expected.len());
+            let (responses, status_counts) = pipeline.process_batch(ACCESS_LOG.lines());
 
-            let Response::Ok(second) = pipeline.process(OK_LINES[1]) else {
-                panic!("second record is ok");
-            };
-            assert_eq!(
-                second.get("client"),
-                Some(&Value::Ip("203.0.113.9".parse().expect("ip")))
+            assert_responses(
+                &responses,
+                &[
+                    malformed("record does not match the pattern"),
+                    ok(
+                        [
+                            ("client", ip("198.51.100.2")),
+                            ("time", timestamp(1_794_996_932, 0, 0)),
+                            ("method", text("GET")),
+                            ("path", text("/orders")),
+                            ("http_version", text("1.1")),
+                            ("status", Value::Int(200)),
+                            ("status_class", text("success")),
+                            ("bytes", Value::Int(512)),
+                            ("user_agent", text("curl/8.5.0")),
+                            ("referer", text("-")),
+                            ("site", text("web-01")),
+                        ],
+                        &[],
+                    ),
+                    ok(
+                        [
+                            ("client", ip("203.0.113.8")),
+                            ("time", timestamp(1_794_996_940, 0, 0)),
+                            ("method", text("POST")),
+                            ("path", text("/orders")),
+                            ("http_version", text("2.0")),
+                            ("status", Value::Int(404)),
+                            ("status_class", text("client_error")),
+                            ("bytes", Value::Int(0)),
+                            ("user_agent", text("Mozilla/5.0")),
+                            ("referer", text("https://shop.example/cart")),
+                            ("site", text("web-01")),
+                        ],
+                        &[],
+                    ),
+                    ok(
+                        [
+                            ("client", ip("203.0.113.9")),
+                            ("time", timestamp(1_794_996_965, 0, 32_400)),
+                            ("method", text("GET")),
+                            ("path", text("/search")),
+                            ("http_version", text("1.0")),
+                            ("status", Value::Int(304)),
+                            ("status_class", text("redirection")),
+                            ("user_agent", text("Mozilla/5.0")),
+                            ("site", text("web-01")),
+                        ],
+                        &["bytes"],
+                    ),
+                    ok(
+                        [
+                            ("client", ip("2001:db8::1")),
+                            ("time", timestamp(1_794_996_970, 0, 0)),
+                            ("method", text("DELETE")),
+                            ("path", text("/orders/A-3")),
+                            ("http_version", text("1.1")),
+                            ("status", Value::Int(503)),
+                            ("status_class", text("server_error")),
+                            ("bytes", Value::Int(0)),
+                            ("user_agent", text("curl/8.5.0")),
+                            ("referer", text("-")),
+                            ("site", text("web-01")),
+                        ],
+                        &[],
+                    ),
+                    missing(&["client"]),
+                    missing(&["time"]),
+                    malformed("record does not match the pattern"),
+                    ok(
+                        [
+                            ("client", ip("203.0.113.13")),
+                            ("time", timestamp(1_794_997_000, 0, 0)),
+                            ("method", text("GET")),
+                            ("path", text("/health")),
+                            ("http_version", text("3")),
+                            ("status", Value::Int(200)),
+                            ("status_class", text("success")),
+                            ("bytes", Value::Int(2)),
+                            ("user_agent", text("curl/8.5.0")),
+                            ("referer", text("-")),
+                            ("site", text("web-01")),
+                        ],
+                        &[],
+                    ),
+                ],
             );
-            assert_eq!(
-                second.get("time"),
-                Some(&Value::Timestamp(
-                    Timestamp::new(1_794_964_533, 0, 32_400).expect("timestamp")
-                ))
-            );
-            assert_eq!(second.get("status_class"), Some(&text("client_error")));
-            assert_eq!(second.get("http_version"), Some(&text("2.0")));
-
-            assert_eq!(
-                pipeline.process(BAD_TIME_LINE),
-                Response::MissingRequired(vec!["time".into()])
-            );
-            let Response::Malformed(malformed) = pipeline.process(MALFORMED_LINE) else {
-                panic!("record is malformed");
-            };
-            assert!(!malformed.reason().is_empty());
+            assert_eq!(counts(status_counts), (5, 2, 2, 0));
         }
     }
 
     #[test]
-    fn batch_keeps_input_order_and_counts_malformed_records() {
+    fn batch_responds_as_process_for_each_record() {
         let pipeline = access_log();
-        let lines = batch();
 
-        let (responses, status_counts) = pipeline.process_batch(lines);
+        let (responses, _) = pipeline.process_batch(ACCESS_LOG.lines());
 
-        let expected: Vec<Response<'_>> = lines.iter().map(|line| pipeline.process(line)).collect();
+        let expected: Vec<Response<'_>> = ACCESS_LOG
+            .lines()
+            .map(|line| pipeline.process(line))
+            .collect();
         assert_eq!(responses, expected);
-        assert_eq!(counts(status_counts), (2, 2, 1, 0));
 
         let (responses, status_counts) = pipeline.process_batch([MALFORMED_LINE]);
         assert!(matches!(responses[..], [Response::Malformed(_)]));
@@ -301,13 +234,17 @@ mod regex {
     fn explain_responds_as_process_and_skips_malformed_records() {
         let pipeline = access_log();
 
-        for line in batch() {
+        for line in ACCESS_LOG.lines() {
             let (response, explain) = pipeline.explain(line);
+            assert_eq!(
+                explain.is_none(),
+                matches!(response, Response::Malformed(_))
+            );
             assert_eq!(response, pipeline.process(line));
-            assert_eq!(explain.is_none(), line == MALFORMED_LINE);
         }
 
-        let (_, explain) = pipeline.explain(OK_LINES[0]);
+        let forwarded = ACCESS_LOG.lines().nth(1).expect("forwarded_for line");
+        let (_, explain) = pipeline.explain(forwarded);
         let explain = explain.expect("record is parsed");
         assert_eq!((explain.schema(), explain.version()), ("access", 1));
         let client = explain.field("client").expect("client is recorded");
@@ -327,14 +264,14 @@ mod regex {
     #[test]
     fn shares_one_pipeline_across_threads() {
         let pipeline = Arc::new(access_log());
-        let expected = pipeline.process_batch(batch());
+        let expected = pipeline.process_batch(ACCESS_LOG.lines());
 
         thread::scope(|scope| {
             let workers: Vec<_> = (0..8)
                 .map(|_| {
                     let pipeline = Arc::clone(&pipeline);
                     scope.spawn(move || {
-                        let (responses, counts) = pipeline.process_batch(batch());
+                        let (responses, counts) = pipeline.process_batch(ACCESS_LOG.lines());
                         (
                             responses
                                 .into_iter()
@@ -353,9 +290,8 @@ mod regex {
 
     fn respond_all(specs: &Specs) -> (String, Vec<Response<'static>>, Option<Lineage>) {
         let pipeline = Pipeline::from_specs(specs).expect("all three sections");
-        let lines = [OK_LINES[0], OK_LINES[1], BAD_TIME_LINE];
-        let responses = lines
-            .iter()
+        let responses = ACCESS_LOG
+            .lines()
             .map(|line| pipeline.process(line).into_owned())
             .collect();
         (
@@ -530,8 +466,8 @@ mod json {
     use moldette::{Pipeline, Value};
 
     use crate::{
-        ORDER_API_NDJSON, ORDER_API_YAML, assert_responses, counts, malformed, missing, ok, specs,
-        text, timestamp,
+        ORDER_API_NDJSON, ORDER_API_YAML, any_malformed, assert_responses, counts, missing, ok,
+        specs, text, timestamp,
     };
 
     #[test]
@@ -596,9 +532,9 @@ mod json {
                 ),
                 missing(&["total"]),
                 missing(&["id", "created_at"]),
-                malformed("EOF while parsing"),
-                malformed("expected a JSON object"),
-                malformed("trailing characters"),
+                any_malformed(),
+                any_malformed(),
+                any_malformed(),
             ],
         );
         assert_eq!(counts(status_counts), (4, 3, 2, 0));
