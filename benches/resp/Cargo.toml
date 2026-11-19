@@ -1,0 +1,24 @@
+[package]
+name = "moldette-bench-resp"
+version.workspace = true
+description = "Benchmarks of the moldette resp layer"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+moldette-bench-support = { path = "../support" }
+moldette-core = { path = "../../crates/moldette-core" }
+moldette-resp = { path = "../../crates/moldette-resp" }
+
+[dev-dependencies]
+criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "throughput"
+harness = false
+
+[[bench]]
+name = "allocations"
+harness = false

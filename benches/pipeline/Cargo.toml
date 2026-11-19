@@ -1,0 +1,23 @@
+[package]
+name = "moldette-bench-pipeline"
+version.workspace = true
+description = "Benchmarks of the moldette pipeline built from configuration"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+moldette = { path = "../../crates/moldette" }
+moldette-bench-support = { path = "../support" }
+
+[dev-dependencies]
+criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "throughput"
+harness = false
+
+[[bench]]
+name = "allocations"
+harness = false
