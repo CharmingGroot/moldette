@@ -3,7 +3,9 @@ use std::borrow::Cow;
 use moldette_core::{Field, FieldRecord, Mapped, SpecError, Type, Value};
 
 use crate::coerce::{coerce, to_timestamp};
-use crate::op::{CompiledOp, CustomOp, DeclaredOp, Op, TimestampDefaults, invalid_argument};
+use crate::op::{
+    CompiledOp, CustomOp, DeclaredOp, Op, TimestampDefaults, Unmatched, invalid_argument,
+};
 use crate::recorder::Recorder;
 use crate::telemetry;
 
@@ -85,16 +87,26 @@ impl Rule {
     }
 
     /// Replaces the text with its value in `table`. The first entry wins when
-    /// a key repeats.
+    /// a key repeats. A text not in the table yields no value.
     pub fn lookup(
         self,
         table: impl IntoIterator<Item = (impl Into<String>, impl Into<String>)>,
+    ) -> Self {
+        self.lookup_with(table, Unmatched::Absent)
+    }
+
+    /// Like [`lookup`](Self::lookup), writing `unmatched` for a text not in
+    /// the table.
+    pub fn lookup_with(
+        self,
+        table: impl IntoIterator<Item = (impl Into<String>, impl Into<String>)>,
+        unmatched: Unmatched,
     ) -> Self {
         let table = table
             .into_iter()
             .map(|(key, value)| (key.into(), value.into()))
             .collect();
-        self.push(DeclaredOp::Lookup(table))
+        self.push(DeclaredOp::Lookup { table, unmatched })
     }
 
     /// Reads the text with the first of `formats` that matches it and writes

@@ -1,5 +1,5 @@
 use moldette_core::{Field, OutputSchema, SpecError};
-use moldette_mapper::{MapperSpec, Rule, TimestampDefaults};
+use moldette_mapper::{MapperSpec, Rule, TimestampDefaults, Unmatched};
 use moldette_parser::{Format, ParserSpec};
 use moldette_resp::RespSpec;
 
@@ -299,7 +299,18 @@ fn rule(entry: &RuleEntry, registry: &Registry) -> Result<Rule, LoadError> {
             OpEntry::Trim => rule.trim(),
             OpEntry::Split { separator, index } => rule.split(*separator, *index),
             OpEntry::Extract { pattern } => rule.extract(pattern),
-            OpEntry::Lookup { table } => rule.lookup(table.iter().cloned()),
+            OpEntry::Lookup {
+                table,
+                default,
+                keep_unmatched,
+            } => {
+                let unmatched = match (default, keep_unmatched) {
+                    (Some(value), _) => Unmatched::Value(value.clone()),
+                    (None, true) => Unmatched::Keep,
+                    (None, false) => Unmatched::Absent,
+                };
+                rule.lookup_with(table.iter().cloned(), unmatched)
+            }
             OpEntry::Timestamp {
                 formats,
                 year,

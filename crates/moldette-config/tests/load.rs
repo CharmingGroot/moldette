@@ -88,7 +88,9 @@ fn reads_yaml_and_json_into_the_same_model() {
                 ("3", "redirection"),
                 ("4", "client_error"),
                 ("5", "server_error"),
-            ])
+            ]),
+            default: None,
+            keep_unmatched: false,
         }
     );
     assert_eq!(
@@ -136,7 +138,9 @@ mapper:
                 ("02", "two"),
                 ("1.50", "price"),
                 ("true", "yes")
-            ])
+            ]),
+            default: None,
+            keep_unmatched: false,
         }]
     );
     assert_eq!(rules[1].source, SourceEntry::Constant("007".into()));
@@ -369,6 +373,21 @@ fn rejects_conflicting_or_missing_rule_source() {
             &LoadErrorKind::MissingOneOf(vec!["from".into(), "coalesce".into(), "constant".into()]),
             "mapper.rules[0]",
             Some((4, 7))
+        )
+    );
+}
+
+#[test]
+fn rejects_lookup_default_together_with_keep_unmatched() {
+    let err = yaml_error(
+        "mapper:\n  schema: {name: order, version: 1}\n  rules:\n    - target: id\n      from: id\n      via:\n        - lookup: {table: {a: b}, default: x, keep_unmatched: true}\n",
+    );
+    assert_eq!(
+        location(&err),
+        (
+            &LoadErrorKind::ConflictingKeys("default".into(), "keep_unmatched".into()),
+            "mapper.rules[0].via[0].lookup",
+            Some((7, 47))
         )
     );
 }

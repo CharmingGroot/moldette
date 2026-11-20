@@ -268,7 +268,7 @@ parser:
         mod spec {
             use moldette_config::Registry;
             use moldette_core::{Field, OutputSchema, SpecError, Type};
-            use moldette_mapper::{MapperSpec, Rule, TimestampDefaults};
+            use moldette_mapper::{MapperSpec, Rule, TimestampDefaults, Unmatched};
 
             use crate::common::{DEPRECATED_FIELDS, build_yaml, invalid_argument, location, spec};
             use crate::{access_log_specs, access_schema, deprecated_schema, mapper_error};
@@ -433,6 +433,41 @@ mapper:
                         ["[month repr:short] [day padding:space] [hour]:[minute]:[second]"],
                         TimestampDefaults::new().year(2023).offset("+09:00"),
                     ))
+                    .build()
+                    .expect("valid spec");
+                assert_eq!(specs.mapper(), Some(&expected));
+            }
+
+            #[test]
+            fn builds_lookup_values_for_texts_outside_the_table() {
+                let specs = build_yaml(
+                    r#"
+schemas:
+  - {name: event, version: 1, fields: [{name: action, type: string}, {name: outcome, type: string}, {name: kind, type: string}]}
+mapper:
+  schema: {name: event, version: 1}
+  rules:
+    - {target: action, from: id, via: [{lookup: {table: {"1": create}, keep_unmatched: true}}]}
+    - {target: outcome, from: error, via: [{lookup: {table: {}, default: failure}}]}
+    - {target: kind, from: id, via: [{lookup: {table: {"1": create}, keep_unmatched: false}}]}
+"#,
+                    &Registry::new(),
+                )
+                .expect("specs are built");
+                let schema = OutputSchema::builder("event", 1)
+                    .field(Field::new("action", Type::String))
+                    .field(Field::new("outcome", Type::String))
+                    .field(Field::new("kind", Type::String))
+                    .build()
+                    .expect("valid schema");
+                let no_entries: [(&str, &str); 0] = [];
+                let expected = MapperSpec::builder(schema)
+                    .rule(Rule::new("action", "id").lookup_with([("1", "create")], Unmatched::Keep))
+                    .rule(
+                        Rule::new("outcome", "error")
+                            .lookup_with(no_entries, Unmatched::Value("failure".into())),
+                    )
+                    .rule(Rule::new("kind", "id").lookup([("1", "create")]))
                     .build()
                     .expect("valid spec");
                 assert_eq!(specs.mapper(), Some(&expected));

@@ -79,13 +79,29 @@ pub(crate) enum DeclaredOp {
         index: usize,
     },
     Extract(String),
-    Lookup(Vec<(String, String)>),
+    Lookup {
+        table: Vec<(String, String)>,
+        unmatched: Unmatched,
+    },
     Timestamp {
         formats: Vec<String>,
         defaults: TimestampDefaults,
     },
     EmptyAsNone,
     Custom(CustomOp),
+}
+
+/// What the `lookup` op writes for a text that is not in its table (#95).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Unmatched {
+    /// No value, so the field is reported as emptied (#5).
+    #[default]
+    Absent,
+    /// This value.
+    Value(String),
+    /// The text itself.
+    Keep,
 }
 
 /// Values the `timestamp` op uses for what a format does not read.
@@ -151,9 +167,15 @@ pub(crate) struct TimeReader {
 #[derive(Debug, Clone)]
 pub(crate) enum CompiledOp {
     Trim,
-    Split { separator: char, index: usize },
+    Split {
+        separator: char,
+        index: usize,
+    },
     Extract(Regex),
-    Lookup(BTreeMap<String, String>),
+    Lookup {
+        table: BTreeMap<String, String>,
+        unmatched: Unmatched,
+    },
     Timestamp(TimeReader),
     EmptyAsNone,
     Custom(CustomOp),
@@ -173,12 +195,15 @@ impl DeclaredOp {
                     .filter(|regex| regex.captures_len() == 2)
                     .ok_or_else(|| invalid_argument("extract.pattern", pattern))?,
             ),
-            Self::Lookup(table) => {
+            Self::Lookup { table, unmatched } => {
                 let mut compiled = BTreeMap::new();
                 for (key, value) in table {
                     compiled.entry(key.clone()).or_insert_with(|| value.clone());
                 }
-                CompiledOp::Lookup(compiled)
+                CompiledOp::Lookup {
+                    table: compiled,
+                    unmatched: unmatched.clone(),
+                }
             }
             Self::Timestamp { formats, .. } if formats.is_empty() => {
                 return Err(invalid_argument("timestamp.formats", ""));
@@ -217,7 +242,7 @@ impl CompiledOp {
             Self::Trim => "trim",
             Self::Split { .. } => "split",
             Self::Extract(_) => "extract",
-            Self::Lookup(_) => "lookup",
+            Self::Lookup { .. } => "lookup",
             Self::Timestamp(_) => "timestamp",
             Self::EmptyAsNone => "empty_as_none",
             Self::Custom(op) => op.name(),
@@ -233,9 +258,14 @@ impl CompiledOp {
             Self::Extract(regex) => {
                 substring(text, |text| Some(regex.captures(text)?.get(1)?.as_str()))
             }
-            Self::Lookup(table) => table
-                .get(text.as_ref())
-                .map(|value| Cow::Borrowed(value.as_str())),
+            Self::Lookup { table, unmatched } => match table.get(text.as_ref()) {
+                Some(value) => Some(Cow::Borrowed(value.as_str())),
+                None => match unmatched {
+                    Unmatched::Absent => None,
+                    Unmatched::Value(value) => Some(Cow::Borrowed(value.as_str())),
+                    Unmatched::Keep => Some(text),
+                },
+            },
             Self::Timestamp(reader) => reader
                 .read(&text)
                 .and_then(|time| time.format(&Rfc3339).ok())

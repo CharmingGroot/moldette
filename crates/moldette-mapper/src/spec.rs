@@ -128,7 +128,7 @@ mod tests {
 
     use super::*;
     use crate::op::CompiledOp;
-    use crate::{Op, TimestampDefaults};
+    use crate::{Op, TimestampDefaults, Unmatched};
 
     const LOG_TIME: &str =
         "[day]/[month repr:short]/[year]:[hour]:[minute]:[second] [offset_hour][offset_minute]";
@@ -263,6 +263,18 @@ mod tests {
             mapped.get("order_id"),
             Some(Value::Str(Cow::Borrowed("STORE")))
         ));
+
+        let spec = MapperSpec::builder(order_schema())
+            .rule(
+                Rule::new("order_id", "channel")
+                    .lookup_with([("w", "WEB")], Unmatched::Value("OTHER".into())),
+            )
+            .build()
+            .expect("valid rule");
+        assert!(matches!(
+            spec.map(&record(&[("channel", "x")])).get("order_id"),
+            Some(Value::Str(Cow::Borrowed("OTHER")))
+        ));
         assert_eq!(mapped.get("quantity"), Some(&Value::Int(1)));
 
         let spec = MapperSpec::builder(order_schema())
@@ -311,6 +323,35 @@ mod tests {
             ),
             (
                 Rule::new("order_id", "raw").lookup([("1", "paid")]),
+                "2",
+                None,
+            ),
+            (
+                Rule::new("order_id", "raw")
+                    .lookup_with([("1", "paid")], Unmatched::Value("other".into())),
+                "2",
+                Some("other"),
+            ),
+            (
+                Rule::new("order_id", "raw")
+                    .lookup_with([("1", "paid")], Unmatched::Value("other".into())),
+                "1",
+                Some("paid"),
+            ),
+            (
+                Rule::new("order_id", "raw").lookup_with([("1", "paid")], Unmatched::Keep),
+                "2",
+                Some("2"),
+            ),
+            (
+                Rule::new("order_id", "raw")
+                    .trim()
+                    .lookup_with([("1", "paid")], Unmatched::Keep),
+                " 4625 ",
+                Some("4625"),
+            ),
+            (
+                Rule::new("order_id", "raw").lookup_with([("1", "paid")], Unmatched::Absent),
                 "2",
                 None,
             ),
