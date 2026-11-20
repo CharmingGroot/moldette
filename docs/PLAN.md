@@ -92,8 +92,8 @@ expression language (#4).
 
 Each layer milestone starts with its standalone API and ends with tests that
 use core types only. M0 to M5 make up v0.1 (tag `v0.1.0`); the v0.2
-improvements are tagged `v0.2.0`, the first public release `v0.3.0` and the
-CLI release `v0.4.0`.
+improvements are tagged `v0.2.0`, the first public release `v0.3.0`, the
+CLI release `v0.4.0` and the configuration and parallel CLI release `v0.5.0`.
 
 ### M0 core
 
@@ -176,11 +176,21 @@ CLI release `v0.4.0`.
 6. release 0.4.0, confirmed by the maintainer first: library crates through trusted publishing; `moldette-cli` published first by the maintainer, then added to trusted publishing (#10)
 7. OpenSSF Scorecard follow-ups: `SECURITY.md` with the reporting channel, response time and supported versions; CodeQL analysis on pull requests and `main`
 
-## After v0.4
+### v0.5 configuration and parallel CLI
+
+1. `timestamp` op: `year` and `offset` arguments for formats without them (#95)
+2. `lookup` op: `default` and `keep_unmatched` arguments for values outside the table
+3. rule key `default`: a constant when no source text is read, recorded in lineage and explain
+4. parser key `none_values`: texts read as absent
+5. CLI `--threads`, defaulting to the available cores: parsing and mapping in parallel batches, output in input order, batch size set by measurement
+6. regex parser: cost per record measured, improvement decided from the result
+7. the public log samples of #95 normalized again and compared with 0.4.0; release 0.5.0, confirmed by the maintainer first
+
+## After v0.5
 
 | Item | Content |
 |---|---|
-| Parallel batch | optional `rayon` feature |
+| Parallel batch | library API, decided from the CLI measurements (#95) |
 | Ports | sidecar (HTTP / gRPC, OTLP export), JVM (UniFFI or WASM on Chicory), Python (PyO3), sandboxed WASM user ops |
 | Supply chain | artifact attestations at the first binary release |
 
