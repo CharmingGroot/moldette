@@ -4,10 +4,10 @@ from affected import Workspace, lock_changes, plan, runs_deny, shared_module_war
 
 CORE, PARSER, MAPPER, RESP = "moldette-core", "moldette-parser", "moldette-mapper", "moldette-resp"
 CONFIG, FACADE, TEST_TRACING = "moldette-config", "moldette", "moldette-test-tracing"
-EXAMPLE, BENCHES = "moldette-otlp-example", "moldette-bench-pipeline"
+EXAMPLE, BENCHES, CLI = "moldette-otlp-example", "moldette-bench-pipeline", "moldette-cli"
 
 WORKSPACE = Workspace(
-    dirs={**{name: f"crates/{name}" for name in (CORE, PARSER, MAPPER, RESP, CONFIG, FACADE, TEST_TRACING)},
+    dirs={**{name: f"crates/{name}" for name in (CORE, PARSER, MAPPER, RESP, CONFIG, FACADE, TEST_TRACING, CLI)},
           EXAMPLE: "examples/otlp", BENCHES: "benches/pipeline"},
     dependencies={
         CORE: {},
@@ -18,6 +18,7 @@ WORKSPACE = Workspace(
         FACADE: {CORE: True, PARSER: True, MAPPER: True, RESP: True, CONFIG: True,
                  TEST_TRACING: False},
         TEST_TRACING: {},
+        CLI: {FACADE: True},
         EXAMPLE: {FACADE: True},
         BENCHES: {FACADE: True},
     },
@@ -47,7 +48,7 @@ E2E_MODULES = {"delimited", "json", "kv", "regex"}
 
 
 def entry(crate, scope, *tests):
-    return {"crate": crate, "scope": scope, "tests": list(tests), "wasm": crate not in (EXAMPLE, BENCHES)}
+    return {"crate": crate, "scope": scope, "tests": list(tests), "wasm": crate not in (EXAMPLE, BENCHES, CLI)}
 
 
 ALL_FULL = [entry(name, "full") for name in sorted(WORKSPACE.dirs)]
@@ -77,6 +78,7 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(scoped("crates/moldette-parser/src/kv.rs"), [
             entry(FACADE, "edge", "--test e2e -- kv::"),
             entry(BENCHES, "edge", "--test allocations"),
+            entry(CLI, "check"),
             entry(CONFIG, "edge", "--test lowering -- lower::parser::kv:: lower::parser::spec::"),
             entry(EXAMPLE, "check"),
             entry(PARSER, "full"),
@@ -89,6 +91,7 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(scoped("crates/moldette-mapper/src/op.rs"), [
             entry(FACADE, "edge", "--test e2e"),
             entry(BENCHES, "edge", "--test allocations"),
+            entry(CLI, "check"),
             entry(CONFIG, "edge", "--test lowering -- lower::mapper::op:: lower::mapper::recorder:: "
                                   "lower::mapper::rule:: lower::mapper::spec::"),
             entry(MAPPER, "full"),
@@ -99,13 +102,14 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(scoped("crates/moldette-config/src/lineage.rs"), [
             entry(FACADE, "edge", "--test e2e"),
             entry(BENCHES, "edge", "--test allocations"),
+            entry(CLI, "check"),
             entry(CONFIG, "full"),
             entry(EXAMPLE, "check"),
         ])
 
     def test_core_runs_every_library_crate_that_uses_it_in_full(self):
         self.assertEqual(scoped("crates/moldette-core/src/value.rs"),
-                         [entry(EXAMPLE, "check") if e["crate"] == EXAMPLE else
+                         [entry(e["crate"], "check") if e["crate"] in (EXAMPLE, CLI) else
                           entry(BENCHES, "edge", "--test allocations") if e["crate"] == BENCHES else e
                           for e in ALL_FULL if e["crate"] != TEST_TRACING])
 
@@ -133,6 +137,7 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(scoped("crates/moldette-parser/src/text.rs"), [
             entry(FACADE, "edge", "--test e2e"),
             entry(BENCHES, "edge", "--test allocations"),
+            entry(CLI, "check"),
             entry(CONFIG, "edge", "--test lowering -- lower::parser::"),
             entry(EXAMPLE, "check"),
             entry(PARSER, "full"),
@@ -151,6 +156,7 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(scoped("crates/moldette/src/pipeline.rs"), [
             entry(FACADE, "full"),
             entry(BENCHES, "edge", "--test allocations"),
+            entry(CLI, "check"),
             entry(EXAMPLE, "check"),
         ])
 
@@ -162,11 +168,16 @@ class PlanTest(unittest.TestCase):
     def test_benches_change_runs_only_the_benches_in_full_for_the_host(self):
         self.assertEqual(scoped("benches/pipeline/src/lib.rs"), [entry(BENCHES, "full")])
 
+    def test_cli_change_runs_only_the_cli_in_full_for_the_host(self):
+        self.assertEqual(scoped("crates/moldette-cli/src/check.rs"), [entry(CLI, "full")])
+        self.assertEqual(scoped("crates/moldette-cli/tests/check.rs"), [entry(CLI, "full")])
+
     def test_coupling_tests_of_several_changes_are_merged(self):
         self.assertEqual(scoped("crates/moldette-parser/src/kv.rs", "crates/moldette-parser/src/json.rs",
-                                "crates/moldette-mapper/src/coerce.rs")[:3], [
+                                "crates/moldette-mapper/src/coerce.rs")[:4], [
             entry(FACADE, "edge", "--test e2e"),
             entry(BENCHES, "edge", "--test allocations"),
+            entry(CLI, "check"),
             entry(CONFIG, "edge", "--test lowering -- lower::mapper::coerce:: lower::mapper::rule:: "
                                   "lower::parser::json:: lower::parser::kv:: lower::parser::spec::"),
         ])
