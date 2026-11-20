@@ -1,0 +1,59 @@
+[package]
+name = "moldette-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "Apache-2.0"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4.13"
+moldette = { path = "../crates/moldette" }
+
+# Built by cargo-fuzz on nightly, outside the main workspace; see #84.
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "json"
+path = "fuzz_targets/json.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "delimited"
+path = "fuzz_targets/delimited.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "regex"
+path = "fuzz_targets/regex.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "kv"
+path = "fuzz_targets/kv.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "bodies"
+path = "fuzz_targets/bodies.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "pipeline"
+path = "fuzz_targets/pipeline.rs"
+test = false
+doc = false
+bench = false

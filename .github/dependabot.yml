@@ -16,3 +16,11 @@ updates:
       - area:supply-chain
     commit-message:
       prefix: ci
+  - package-ecosystem: cargo
+    directory: /fuzz
+    schedule:
+      interval: weekly
+    labels:
+      - area:supply-chain
+    commit-message:
+      prefix: chore
