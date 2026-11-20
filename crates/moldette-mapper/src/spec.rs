@@ -127,8 +127,8 @@ mod tests {
     };
 
     use super::*;
-    use crate::Op;
     use crate::op::CompiledOp;
+    use crate::{Op, TimestampDefaults};
 
     const LOG_TIME: &str =
         "[day]/[month repr:short]/[year]:[hour]:[minute]:[second] [offset_hour][offset_minute]";
@@ -422,6 +422,56 @@ mod tests {
     }
 
     #[test]
+    fn timestamp_defaults_fill_the_year_and_offset_a_format_does_not_read() {
+        const SYSLOG_TIME: &str = "[month repr:short] [day padding:space] [hour]:[minute]:[second]";
+        let at = |defaults: TimestampDefaults, text: &str| {
+            map_with(
+                Rule::new("ordered_at", "at").timestamp_with([SYSLOG_TIME, LOG_TIME], defaults),
+                &[("at", text)],
+            )
+            .get("ordered_at")
+            .cloned()
+        };
+        let timestamp = |seconds, offset| Timestamp::new(seconds, 0, offset).map(Value::Timestamp);
+        let cases = [
+            (TimestampDefaults::new(), "Nov 14 22:13:20", None),
+            (
+                TimestampDefaults::new().year(2023),
+                "Nov 14 22:13:20",
+                timestamp(1_700_000_000, 0),
+            ),
+            (
+                TimestampDefaults::new().year(2023).offset("+09:00"),
+                "Nov 14 22:13:20",
+                timestamp(1_699_967_600, 9 * 60 * 60),
+            ),
+            (
+                TimestampDefaults::new().year(2023).offset("-05:30"),
+                "Nov 14 22:13:20",
+                timestamp(1_700_019_800, -(5 * 60 * 60 + 30 * 60)),
+            ),
+            (TimestampDefaults::new().year(2023), "Feb 29 00:00:00", None),
+            (
+                TimestampDefaults::new().year(2024),
+                "Feb 29 00:00:00",
+                timestamp(1_709_164_800, 0),
+            ),
+            (
+                TimestampDefaults::new().year(1999).offset("-05:00"),
+                "14/Nov/2023:22:13:20 +0900",
+                timestamp(1_699_967_600, 9 * 60 * 60),
+            ),
+        ];
+        for (defaults, text, expected) in cases {
+            assert_eq!(
+                at(defaults.clone(), text),
+                expected,
+                "{defaults:?} {text:?}"
+            );
+        }
+    }
+
+    #[test]
     fn coalesce_takes_the_first_present_source_before_ops() {
         let rule = Rule::coalesce("quantity", ["qty", "count", "n"]).trim();
 
@@ -546,6 +596,24 @@ mod tests {
                 Rule::new("ordered_at", "at").timestamp(empty),
                 "timestamp.formats",
                 "",
+            ),
+            (
+                Rule::new("ordered_at", "at")
+                    .timestamp_with([LOCAL_TIME], TimestampDefaults::new().year(10_000)),
+                "timestamp.year",
+                "10000",
+            ),
+            (
+                Rule::new("ordered_at", "at")
+                    .timestamp_with([LOCAL_TIME], TimestampDefaults::new().offset("09:00")),
+                "timestamp.offset",
+                "09:00",
+            ),
+            (
+                Rule::new("ordered_at", "at")
+                    .timestamp_with([LOCAL_TIME], TimestampDefaults::new().offset("+24:00")),
+                "timestamp.offset",
+                "+24:00",
             ),
             (Rule::coalesce("quantity", empty), "coalesce.from", ""),
         ];

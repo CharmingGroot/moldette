@@ -74,7 +74,9 @@ fn reads_yaml_and_json_into_the_same_model() {
             formats: vec![
                 "[day]/[month repr:short]/[year]:[hour]:[minute]:[second] [offset_hour][offset_minute]"
                     .into()
-            ]
+            ],
+            year: None,
+            offset: None,
         }]
     );
     assert_eq!(

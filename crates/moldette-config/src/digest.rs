@@ -231,9 +231,25 @@ impl Encoder {
                 self.tag(3);
                 self.pairs(table);
             }
-            OpEntry::Timestamp { formats } => {
+            OpEntry::Timestamp {
+                formats,
+                year: None,
+                offset: None,
+            } => {
                 self.tag(4);
                 self.list(formats, |encoder, format| encoder.text(format));
+            }
+            OpEntry::Timestamp {
+                formats,
+                year,
+                offset,
+            } => {
+                self.tag(7);
+                self.list(formats, |encoder, format| encoder.text(format));
+                self.option(year.as_ref(), |encoder, year| {
+                    encoder.text(&year.to_string())
+                });
+                self.option(offset.as_ref(), |encoder, offset| encoder.text(offset));
             }
             OpEntry::EmptyAsNone => self.tag(5),
             OpEntry::Custom { name, arguments } => {

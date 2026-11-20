@@ -11,7 +11,7 @@ use time::error::TryFromParsed;
 use time::format_description::well_known::Rfc3339;
 use time::format_description::{self, OwnedFormatItem};
 use time::parsing::Parsed;
-use time::{OffsetDateTime, PrimitiveDateTime};
+use time::{Date, OffsetDateTime, PrimitiveDateTime, UtcOffset};
 
 /// A value conversion defined by the caller and added to a rule with
 /// [`Rule::via`](crate::Rule::via).
@@ -74,12 +74,78 @@ impl Eq for CustomOp {}
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum DeclaredOp {
     Trim,
-    Split { separator: char, index: usize },
+    Split {
+        separator: char,
+        index: usize,
+    },
     Extract(String),
     Lookup(Vec<(String, String)>),
-    Timestamp(Vec<String>),
+    Timestamp {
+        formats: Vec<String>,
+        defaults: TimestampDefaults,
+    },
     EmptyAsNone,
     Custom(CustomOp),
+}
+
+/// Values the `timestamp` op uses for what a format does not read.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TimestampDefaults {
+    year: Option<i32>,
+    offset: Option<String>,
+}
+
+impl TimestampDefaults {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The year of a text whose format reads no year. The build fails
+    /// outside -9999 to 9999.
+    pub fn year(mut self, year: i32) -> Self {
+        self.year = Some(year);
+        self
+    }
+
+    /// The UTC offset, written `+HH:MM` or `-HH:MM`, of a text whose format
+    /// reads no offset; without it the text is read as UTC. The build fails
+    /// on any other form and on an offset of a day or more.
+    pub fn offset(mut self, offset: impl Into<String>) -> Self {
+        self.offset = Some(offset.into());
+        self
+    }
+
+    fn compile(&self) -> Result<(Option<i32>, UtcOffset), SpecError> {
+        let year = match self.year {
+            Some(year) if !(Date::MIN.year()..=Date::MAX.year()).contains(&year) => {
+                return Err(invalid_argument("timestamp.year", &year.to_string()));
+            }
+            year => year,
+        };
+        let offset = match &self.offset {
+            Some(text) => {
+                parse_offset(text).ok_or_else(|| invalid_argument("timestamp.offset", text))?
+            }
+            None => UtcOffset::UTC,
+        };
+        Ok((year, offset))
+    }
+}
+
+fn parse_offset(text: &str) -> Option<UtcOffset> {
+    let format =
+        format_description::parse_borrowed::<2>("[offset_hour sign:mandatory]:[offset_minute]")
+            .ok()?;
+    UtcOffset::parse(text, &format)
+        .ok()
+        .filter(|offset| offset.whole_seconds().unsigned_abs() < 24 * 60 * 60)
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct TimeReader {
+    formats: Vec<OwnedFormatItem>,
+    year: Option<i32>,
+    offset: UtcOffset,
 }
 
 #[derive(Debug, Clone)]
@@ -88,7 +154,7 @@ pub(crate) enum CompiledOp {
     Split { separator: char, index: usize },
     Extract(Regex),
     Lookup(BTreeMap<String, String>),
-    Timestamp(Vec<OwnedFormatItem>),
+    Timestamp(TimeReader),
     EmptyAsNone,
     Custom(CustomOp),
 }
@@ -114,18 +180,24 @@ impl DeclaredOp {
                 }
                 CompiledOp::Lookup(compiled)
             }
-            Self::Timestamp(formats) if formats.is_empty() => {
+            Self::Timestamp { formats, .. } if formats.is_empty() => {
                 return Err(invalid_argument("timestamp.formats", ""));
             }
-            Self::Timestamp(formats) => CompiledOp::Timestamp(
-                formats
+            Self::Timestamp { formats, defaults } => {
+                let formats = formats
                     .iter()
                     .map(|format| {
                         format_description::parse_owned::<2>(format)
                             .map_err(|_| invalid_argument("timestamp.formats", format))
                     })
-                    .collect::<Result<_, _>>()?,
-            ),
+                    .collect::<Result<_, _>>()?;
+                let (year, offset) = defaults.compile()?;
+                CompiledOp::Timestamp(TimeReader {
+                    formats,
+                    year,
+                    offset,
+                })
+            }
             Self::EmptyAsNone => CompiledOp::EmptyAsNone,
             Self::Custom(op) => CompiledOp::Custom(op.clone()),
         })
@@ -164,7 +236,8 @@ impl CompiledOp {
             Self::Lookup(table) => table
                 .get(text.as_ref())
                 .map(|value| Cow::Borrowed(value.as_str())),
-            Self::Timestamp(formats) => read_time(formats, &text)
+            Self::Timestamp(reader) => reader
+                .read(&text)
                 .and_then(|time| time.format(&Rfc3339).ok())
                 .map(Cow::Owned),
             Self::EmptyAsNone => (!text.is_empty()).then_some(text),
@@ -183,27 +256,33 @@ fn substring<'a>(
     }
 }
 
-pub(crate) fn read_rfc3339_time(formats: &[OwnedFormatItem], text: &str) -> Option<OffsetDateTime> {
-    read_time(formats, text).filter(|time| time.format_into(&mut io::sink(), &Rfc3339).is_ok())
-}
+impl TimeReader {
+    pub(crate) fn read_rfc3339(&self, text: &str) -> Option<OffsetDateTime> {
+        self.read(text)
+            .filter(|time| time.format_into(&mut io::sink(), &Rfc3339).is_ok())
+    }
 
-fn read_time(formats: &[OwnedFormatItem], text: &str) -> Option<OffsetDateTime> {
-    formats
-        .iter()
-        .find_map(|format| parse_timestamp(text, format))
-}
+    fn read(&self, text: &str) -> Option<OffsetDateTime> {
+        self.formats
+            .iter()
+            .find_map(|format| self.parse(text, format))
+    }
 
-fn parse_timestamp(text: &str, format: &OwnedFormatItem) -> Option<OffsetDateTime> {
-    let mut parsed = Parsed::new();
-    parsed
-        .parse_item(text.as_bytes(), format)
-        .ok()
-        .filter(|rest| rest.is_empty())?;
-    match OffsetDateTime::try_from(parsed) {
-        Ok(timestamp) => Some(timestamp),
-        Err(TryFromParsed::InsufficientInformation) => PrimitiveDateTime::try_from(parsed)
+    fn parse(&self, text: &str, format: &OwnedFormatItem) -> Option<OffsetDateTime> {
+        let mut parsed = Parsed::new();
+        parsed
+            .parse_item(text.as_bytes(), format)
             .ok()
-            .map(PrimitiveDateTime::assume_utc),
-        Err(_) => None,
+            .filter(|rest| rest.is_empty())?;
+        if let (None, Some(year)) = (parsed.year(), self.year) {
+            parsed.set_year(year)?;
+        }
+        match OffsetDateTime::try_from(parsed) {
+            Ok(timestamp) => Some(timestamp),
+            Err(TryFromParsed::InsufficientInformation) => PrimitiveDateTime::try_from(parsed)
+                .ok()
+                .map(|time| time.assume_offset(self.offset)),
+            Err(_) => None,
+        }
     }
 }
