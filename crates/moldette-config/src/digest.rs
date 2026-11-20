@@ -227,9 +227,23 @@ impl Encoder {
                 self.tag(2);
                 self.text(pattern);
             }
-            OpEntry::Lookup { table } => {
+            OpEntry::Lookup {
+                table,
+                default: None,
+                keep_unmatched: false,
+            } => {
                 self.tag(3);
                 self.pairs(table);
+            }
+            OpEntry::Lookup {
+                table,
+                default,
+                keep_unmatched,
+            } => {
+                self.tag(8);
+                self.pairs(table);
+                self.option(default.as_ref(), |encoder, value| encoder.text(value));
+                self.flag(*keep_unmatched);
             }
             OpEntry::Timestamp {
                 formats,

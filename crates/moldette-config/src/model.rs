@@ -169,9 +169,12 @@ pub enum OpEntry {
     Extract {
         pattern: String,
     },
-    /// Entries in declared order.
+    /// Entries in declared order. A text not in the table takes `default`,
+    /// stays as it is with `keep_unmatched`, or yields no value (#95).
     Lookup {
         table: Vec<(String, String)>,
+        default: Option<String>,
+        keep_unmatched: bool,
     },
     /// `year` and `offset` fill what a format does not read (#95).
     Timestamp {
@@ -207,7 +210,7 @@ pub(crate) const BUILT_IN_OPS: [(&str, &[&str]); 6] = [
     ("trim", &[]),
     ("split", &["separator", "index"]),
     ("extract", &["pattern"]),
-    ("lookup", &["table"]),
+    ("lookup", &["table", "default", "keep_unmatched"]),
     ("timestamp", &["formats", "year", "offset"]),
     ("empty_as_none", &[]),
 ];
@@ -457,9 +460,20 @@ fn op_with_arguments(name: &str, cursor: Cursor<'_>) -> Result<OpEntry, LoadErro
         "extract" => OpEntry::Extract {
             pattern: map.require("pattern")?.string()?,
         },
-        "lookup" => OpEntry::Lookup {
-            table: string_map(map.require("table")?)?,
-        },
+        "lookup" => {
+            let unmatched = map.at_most_one_of(&["default", "keep_unmatched"])?;
+            OpEntry::Lookup {
+                table: string_map(map.require("table")?)?,
+                default: match &unmatched {
+                    Some(("default", value)) => Some(value.string()?),
+                    _ => None,
+                },
+                keep_unmatched: match &unmatched {
+                    Some(("keep_unmatched", value)) => value.bool()?,
+                    _ => false,
+                },
+            }
+        }
         "timestamp" => OpEntry::Timestamp {
             formats: map.require("formats")?.list(|item| item.string())?,
             year: map.get("year").map(|year| year.integer()).transpose()?,

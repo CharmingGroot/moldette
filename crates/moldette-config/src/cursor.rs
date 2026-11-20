@@ -138,14 +138,23 @@ impl<'n> MapReader<'n> {
         &self,
         keys: &[&'static str],
     ) -> Result<(&'static str, Cursor<'n>), LoadError> {
+        self.at_most_one_of(keys)?.ok_or_else(|| {
+            self.cursor.error(LoadErrorKind::MissingOneOf(
+                keys.iter().map(|k| (*k).to_owned()).collect(),
+            ))
+        })
+    }
+
+    pub(crate) fn at_most_one_of(
+        &self,
+        keys: &[&'static str],
+    ) -> Result<Option<(&'static str, Cursor<'n>)>, LoadError> {
         let mut present = self
             .entries
             .iter()
             .filter_map(|(key, _)| keys.iter().find(|k| **k == key.text).map(|k| (*k, key)));
         let Some((first, _)) = present.next() else {
-            return Err(self.cursor.error(LoadErrorKind::MissingOneOf(
-                keys.iter().map(|k| (*k).to_owned()).collect(),
-            )));
+            return Ok(None);
         };
         if let Some((second, key)) = present.next() {
             return Err(self.key_error(
@@ -153,7 +162,7 @@ impl<'n> MapReader<'n> {
                 key,
             ));
         }
-        self.require(first).map(|cursor| (first, cursor))
+        self.require(first).map(|cursor| Some((first, cursor)))
     }
 
     pub(crate) fn conflict(&self) -> LoadError {

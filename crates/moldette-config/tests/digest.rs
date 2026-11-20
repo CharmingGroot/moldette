@@ -100,6 +100,12 @@ fn digests_configurations_that_differ_differently() {
             "via: [trim]",
             "via: [{timestamp: {formats: ['[day]'], offset: '+09:00'}}]",
         ),
+        CSV_ORDERS.replace("via: [trim]", "via: [{lookup: {table: {a: b}}}]"),
+        CSV_ORDERS.replace("via: [trim]", "via: [{lookup: {table: {a: b}, default: c}}]"),
+        CSV_ORDERS.replace(
+            "via: [trim]",
+            "via: [{lookup: {table: {a: b}, keep_unmatched: true}}]",
+        ),
     ];
     let digests: HashSet<String> = variants.iter().map(|text| digest_yaml(text)).collect();
     assert_eq!(digests.len(), variants.len());

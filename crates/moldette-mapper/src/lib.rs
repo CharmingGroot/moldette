@@ -20,7 +20,7 @@ mod rule;
 mod spec;
 mod telemetry;
 
-pub use op::{Op, TimestampDefaults};
+pub use op::{Op, TimestampDefaults, Unmatched};
 pub use rule::Rule;
 pub use spec::{MapperSpec, MapperSpecBuilder};
 
@@ -40,6 +40,7 @@ mod tests {
         assert_send_sync::<MapperSpecBuilder>();
         assert_send_sync::<Rule>();
         assert_send_sync::<TimestampDefaults>();
+        assert_send_sync::<Unmatched>();
         assert_send_sync::<Box<dyn Op>>();
     }
 
