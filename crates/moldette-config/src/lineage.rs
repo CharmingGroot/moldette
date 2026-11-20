@@ -38,6 +38,7 @@ pub struct LineageField {
     source: LineageSource,
     reads: Vec<LineageRead>,
     ops: Vec<String>,
+    default: Option<String>,
 }
 
 impl LineageField {
@@ -59,6 +60,11 @@ impl LineageField {
     /// ops report.
     pub fn ops(&self) -> &[String] {
         &self.ops
+    }
+
+    /// The value taken when none of the reads finds text (#95).
+    pub fn default(&self) -> Option<&str> {
+        self.default.as_deref()
     }
 }
 
@@ -151,12 +157,14 @@ impl Config {
                         source: LineageSource::Absent,
                         reads: Vec::new(),
                         ops: Vec::new(),
+                        default: None,
                     },
                     None => LineageField {
                         name: field.name.clone(),
                         source: LineageSource::SameName,
                         reads: vec![read(&field.name, false, &origins)],
                         ops: Vec::new(),
+                        default: None,
                     },
                 },
             )
@@ -206,6 +214,7 @@ fn rule_lineage(rule: &RuleEntry, origins: &Origins<'_>) -> LineageField {
         source,
         reads,
         ops: rule.via.iter().map(|op| op_name(op).to_owned()).collect(),
+        default: rule.default.clone(),
     }
 }
 

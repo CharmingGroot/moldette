@@ -294,6 +294,10 @@ fn rule(entry: &RuleEntry, registry: &Registry) -> Result<Rule, LoadError> {
         Some(from) => rule.fallback(from),
         None => rule,
     };
+    let rule = match &entry.default {
+        Some(value) => rule.default(value),
+        None => rule,
+    };
     entry.via.iter().try_fold(rule, |rule, op| {
         Ok(match op {
             OpEntry::Trim => rule.trim(),
@@ -367,6 +371,9 @@ fn rules_in_schema_order<'r>(
 }
 
 fn argument_path(rule: &RuleEntry, name: &str, value: &str) -> Option<String> {
+    if name == "default" {
+        return (rule.default.as_deref() == Some(value)).then(|| "default".to_owned());
+    }
     if name == "coalesce.from" {
         return matches!(&rule.source, SourceEntry::Coalesce(from) if from.is_empty())
             .then(|| "coalesce".to_owned());

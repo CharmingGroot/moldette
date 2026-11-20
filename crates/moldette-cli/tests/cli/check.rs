@@ -38,6 +38,7 @@ fn prints_digest_and_lineage_of_a_valid_configuration() {
                 "origin": [{"format": "json", "path": "/customer/id"}],
             }],
             "ops": [],
+            "default": null,
         })
     );
 }

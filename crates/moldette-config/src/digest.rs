@@ -192,27 +192,32 @@ impl Encoder {
             source,
             fallback,
             via,
+            default,
             target_position: _,
             source_positions: _,
             fallback_position: _,
         } = entry;
         self.text(target);
+        let with_default = if default.is_some() { 3 } else { 0 };
         match source {
             SourceEntry::From(name) => {
-                self.tag(0);
+                self.tag(with_default);
                 self.text(name);
             }
             SourceEntry::Coalesce(names) => {
-                self.tag(1);
+                self.tag(with_default + 1);
                 self.list(names, |encoder, name| encoder.text(name));
             }
             SourceEntry::Constant(value) => {
-                self.tag(2);
+                self.tag(with_default + 2);
                 self.text(value);
             }
         }
         self.option(fallback.as_ref(), |encoder, name| encoder.text(name));
         self.list(via, Self::op);
+        if let Some(value) = default {
+            self.text(value);
+        }
     }
 
     fn op(&mut self, op: &OpEntry) {
