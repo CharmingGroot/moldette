@@ -174,6 +174,7 @@ CLI release `v0.4.0`.
 4. fuzz targets for `json`, `delimited`, `regex`, `kv`, header + body composition and pipeline `process`, seeded from test fixtures
 5. fuzzing in CI: weekly and manual runs per target; fuzz targets built on pull requests
 6. release 0.4.0, confirmed by the maintainer first: library crates through trusted publishing; `moldette-cli` published first by the maintainer, then added to trusted publishing (#10)
+7. OpenSSF Scorecard follow-ups: `SECURITY.md` with the reporting channel, response time and supported versions; CodeQL analysis on pull requests and `main`
 
 ## After v0.4
 
