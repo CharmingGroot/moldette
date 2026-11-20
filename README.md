@@ -46,6 +46,8 @@ produced by another system.
 - `moldette-config`: configuration files, cross-layer checks, lineage.
 - `moldette-parser`, `moldette-mapper`, `moldette-resp`: one layer each.
 - `moldette-core`: the types the layers exchange.
+- `moldette-cli`: the `moldette` command, which checks a configuration file
+  and runs it over records.
 
 Of the moldette crates, each layer crate depends only on `moldette-core`. No
 library crate performs I/O or keeps global state, and each builds for
@@ -67,6 +69,17 @@ let pipeline = Pipeline::from_specs(&specs)?;
 let response = pipeline.process(raw);
 ```
 
+The same configuration can be checked and run from the command line:
+
+    moldette check order.yaml
+    moldette run order.yaml orders.ndjson
+    moldette explain order.yaml orders.ndjson
+
+`check` reports what the configuration gets wrong and prints its lineage as
+JSON. `run` reads one record per line from a file or standard input and prints
+one JSON response per line; `explain` adds how each field was filled. Only
+built-in formats and operations are available from the command line.
+
 Configuration examples for a JSON API response, a CSV export and an nginx
 access log are in `crates/moldette-config/tests/fixtures`. The
 `examples/otlp` program sends the spans of a pipeline to an OpenTelemetry
@@ -75,6 +88,10 @@ collector.
 ## Installation
 
     cargo add moldette
+
+For the command:
+
+    cargo install moldette-cli
 
 The default `config` feature turns on every layer. To use one layer without
 configuration files, depend on its crate, such as `moldette-parser`, or turn
