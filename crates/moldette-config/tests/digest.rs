@@ -73,6 +73,10 @@ schemas:
         specs.digest().to_owned()
     });
     assert_eq!(fixtures[0], fixtures[1]);
+    assert_eq!(
+        fixtures[0],
+        "sha256:0e917a525079ecb2b61693a816a48e96c19a6240f772c052b2683dd681e8163f"
+    );
     assert_ne!(fixtures[0], digest);
 }
 
@@ -90,6 +94,12 @@ fn digests_configurations_that_differ_differently() {
             "      - {name: amount, type: float}\n      - {name: id, type: string, required: true}\n",
         ),
         format!("{CSV_ORDERS}  strict: true\n"),
+        CSV_ORDERS.replace("via: [trim]", "via: [{timestamp: {formats: ['[day]']}}]"),
+        CSV_ORDERS.replace("via: [trim]", "via: [{timestamp: {formats: ['[day]'], year: 2023}}]"),
+        CSV_ORDERS.replace(
+            "via: [trim]",
+            "via: [{timestamp: {formats: ['[day]'], offset: '+09:00'}}]",
+        ),
     ];
     let digests: HashSet<String> = variants.iter().map(|text| digest_yaml(text)).collect();
     assert_eq!(digests.len(), variants.len());

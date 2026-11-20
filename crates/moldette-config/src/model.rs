@@ -173,8 +173,11 @@ pub enum OpEntry {
     Lookup {
         table: Vec<(String, String)>,
     },
+    /// `year` and `offset` fill what a format does not read (#95).
     Timestamp {
         formats: Vec<String>,
+        year: Option<i32>,
+        offset: Option<String>,
     },
     EmptyAsNone,
     /// An op registered by the caller.
@@ -205,7 +208,7 @@ pub(crate) const BUILT_IN_OPS: [(&str, &[&str]); 6] = [
     ("split", &["separator", "index"]),
     ("extract", &["pattern"]),
     ("lookup", &["table"]),
-    ("timestamp", &["formats"]),
+    ("timestamp", &["formats", "year", "offset"]),
     ("empty_as_none", &[]),
 ];
 
@@ -459,6 +462,11 @@ fn op_with_arguments(name: &str, cursor: Cursor<'_>) -> Result<OpEntry, LoadErro
         },
         "timestamp" => OpEntry::Timestamp {
             formats: map.require("formats")?.list(|item| item.string())?,
+            year: map.get("year").map(|year| year.integer()).transpose()?,
+            offset: map
+                .get("offset")
+                .map(|offset| offset.string())
+                .transpose()?,
         },
         "trim" => OpEntry::Trim,
         _ => OpEntry::EmptyAsNone,

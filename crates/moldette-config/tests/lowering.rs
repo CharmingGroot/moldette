@@ -268,7 +268,7 @@ parser:
         mod spec {
             use moldette_config::Registry;
             use moldette_core::{Field, OutputSchema, SpecError, Type};
-            use moldette_mapper::{MapperSpec, Rule};
+            use moldette_mapper::{MapperSpec, Rule, TimestampDefaults};
 
             use crate::common::{DEPRECATED_FIELDS, build_yaml, invalid_argument, location, spec};
             use crate::{access_log_specs, access_schema, deprecated_schema, mapper_error};
@@ -321,6 +321,16 @@ parser:
                         "    - target: placed_at\n      from: time\n      via: [{timestamp: {formats: []}}]\n",
                         spec(invalid_argument("timestamp.formats", "")),
                         "mapper.rules[0].via[0].timestamp.formats",
+                    ),
+                    (
+                        "    - target: placed_at\n      from: time\n      via: [trim, {timestamp: {formats: ['[month repr:short] [day]'], year: 10000}}]\n",
+                        spec(invalid_argument("timestamp.year", "10000")),
+                        "mapper.rules[0].via[1].timestamp.year",
+                    ),
+                    (
+                        "    - target: placed_at\n      from: time\n      via: [{timestamp: {formats: ['[month repr:short] [day]'], offset: '09:00'}}]\n",
+                        spec(invalid_argument("timestamp.offset", "09:00")),
+                        "mapper.rules[0].via[0].timestamp.offset",
                     ),
                 ];
                 for (rules, kind, path) in cases {
@@ -392,6 +402,40 @@ mapper:
                     .expect("valid spec");
                 assert_eq!(specs.mapper(), Some(&explicit));
                 assert_ne!(specs.mapper(), Some(&same_name));
+            }
+
+            #[test]
+            fn builds_timestamp_defaults() {
+                let specs = build_yaml(
+                    r#"
+schemas:
+  - {name: login, version: 1, fields: [{name: at, type: timestamp}]}
+mapper:
+  schema: {name: login, version: 1}
+  rules:
+    - target: at
+      from: time
+      via:
+        - timestamp:
+            formats: ["[month repr:short] [day padding:space] [hour]:[minute]:[second]"]
+            year: 2023
+            offset: "+09:00"
+"#,
+                    &Registry::new(),
+                )
+                .expect("specs are built");
+                let schema = OutputSchema::builder("login", 1)
+                    .field(Field::new("at", Type::Timestamp))
+                    .build()
+                    .expect("valid schema");
+                let expected = MapperSpec::builder(schema)
+                    .rule(Rule::new("at", "time").timestamp_with(
+                        ["[month repr:short] [day padding:space] [hour]:[minute]:[second]"],
+                        TimestampDefaults::new().year(2023).offset("+09:00"),
+                    ))
+                    .build()
+                    .expect("valid spec");
+                assert_eq!(specs.mapper(), Some(&expected));
             }
 
             #[test]

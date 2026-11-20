@@ -1,5 +1,5 @@
 use moldette_core::{Field, OutputSchema, SpecError};
-use moldette_mapper::{MapperSpec, Rule};
+use moldette_mapper::{MapperSpec, Rule, TimestampDefaults};
 use moldette_parser::{Format, ParserSpec};
 use moldette_resp::RespSpec;
 
@@ -300,7 +300,20 @@ fn rule(entry: &RuleEntry, registry: &Registry) -> Result<Rule, LoadError> {
             OpEntry::Split { separator, index } => rule.split(*separator, *index),
             OpEntry::Extract { pattern } => rule.extract(pattern),
             OpEntry::Lookup { table } => rule.lookup(table.iter().cloned()),
-            OpEntry::Timestamp { formats } => rule.timestamp(formats),
+            OpEntry::Timestamp {
+                formats,
+                year,
+                offset,
+            } => {
+                let mut defaults = TimestampDefaults::new();
+                if let Some(year) = year {
+                    defaults = defaults.year(*year);
+                }
+                if let Some(offset) = offset {
+                    defaults = defaults.offset(offset);
+                }
+                rule.timestamp_with(formats, defaults)
+            }
             OpEntry::EmptyAsNone => rule.empty_as_none(),
             OpEntry::Custom { name, arguments } => rule.via(registry.build_op(name, arguments)?),
         })
@@ -353,7 +366,14 @@ fn argument_path(rule: &RuleEntry, name: &str, value: &str) -> Option<String> {
             OpEntry::Extract { pattern } if name == "extract.pattern" && pattern == value => {
                 Some(argument)
             }
-            OpEntry::Timestamp { formats } if name == "timestamp.formats" => {
+            OpEntry::Timestamp {
+                year: Some(year), ..
+            } if name == "timestamp.year" && year.to_string() == value => Some(argument),
+            OpEntry::Timestamp {
+                offset: Some(offset),
+                ..
+            } if name == "timestamp.offset" && offset == value => Some(argument),
+            OpEntry::Timestamp { formats, .. } if name == "timestamp.formats" => {
                 if formats.is_empty() {
                     Some(argument)
                 } else {

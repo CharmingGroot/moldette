@@ -3,7 +3,7 @@ use std::borrow::Cow;
 use moldette_core::{Field, FieldRecord, Mapped, SpecError, Type, Value};
 
 use crate::coerce::{coerce, to_timestamp};
-use crate::op::{CompiledOp, CustomOp, DeclaredOp, Op, invalid_argument, read_rfc3339_time};
+use crate::op::{CompiledOp, CustomOp, DeclaredOp, Op, TimestampDefaults, invalid_argument};
 use crate::recorder::Recorder;
 use crate::telemetry;
 
@@ -102,8 +102,18 @@ impl Rule {
     /// the `time` crate; a format without an offset reads the text as UTC. The
     /// build fails when `formats` is empty or a format is not valid.
     pub fn timestamp(self, formats: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.timestamp_with(formats, TimestampDefaults::new())
+    }
+
+    /// Like [`timestamp`](Self::timestamp), taking the year and offset a
+    /// format does not read from `defaults` (#95).
+    pub fn timestamp_with(
+        self,
+        formats: impl IntoIterator<Item = impl Into<String>>,
+        defaults: TimestampDefaults,
+    ) -> Self {
         let formats = formats.into_iter().map(Into::into).collect();
-        self.push(DeclaredOp::Timestamp(formats))
+        self.push(DeclaredOp::Timestamp { formats, defaults })
     }
 
     /// Treats an empty text as absent.
@@ -208,9 +218,9 @@ impl CompiledRule {
         recorder: &mut R,
     ) -> Option<Value<'a>> {
         let value = match (self.via.split_last(), ty) {
-            (Some((last @ CompiledOp::Timestamp(formats), leading)), Type::Timestamp) => {
+            (Some((last @ CompiledOp::Timestamp(reader), leading)), Type::Timestamp) => {
                 let text = apply_ops(leading, text, recorder)?;
-                let time = read_rfc3339_time(formats, &text);
+                let time = reader.read_rfc3339(&text);
                 recorder.step_time(last, time.as_ref());
                 to_timestamp(time?).map(Value::Timestamp)
             }
