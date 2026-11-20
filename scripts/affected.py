@@ -30,6 +30,7 @@ from module_graph import Graph, crate_graphs, file_module, strip_comments_and_li
 
 FULL_PATHS = ("Cargo.toml", "deny.toml", "rust-toolchain.toml", ".github/", "scripts/")
 DENY_FILES = ("Cargo.toml", "Cargo.lock", "deny.toml")
+FUZZ_DIR = "fuzz/"
 SHARED_KERNEL_CRATES = ("moldette-core",)
 SHARED_KERNEL_MODULES = {
     "moldette-config": {"diagnostic", "error", "node", "position"},
@@ -96,6 +97,20 @@ def is_full_path(path: str) -> bool:
 
 def runs_deny(files: list[str]) -> bool:
     return any(Path(f).name in DENY_FILES for f in files)
+
+
+def runs_fuzz(files: list[str], workspace: Workspace) -> bool:
+    """Return whether a change can break the fuzz targets, which build the
+    facade and every crate it depends on (#84)."""
+    fuzzed = {FACADE_CRATE}
+    pending = [FACADE_CRATE]
+    while pending:
+        for dependency, normal in workspace.dependencies.get(pending.pop(), {}).items():
+            if normal and dependency not in fuzzed:
+                fuzzed.add(dependency)
+                pending.append(dependency)
+    dirs = tuple(workspace.dirs[crate] + "/" for crate in fuzzed)
+    return any(f.startswith(FUZZ_DIR) or f.startswith(dirs) or is_full_path(f) for f in files)
 
 
 def module_of(path: Path, graph: Graph, kernels: set[str]) -> Optional[str]:
@@ -290,7 +305,7 @@ def load_workspace() -> Workspace:
 def main() -> None:
     workspace = load_workspace()
     if sys.argv[1:] == ["--full"]:
-        entries, deny = full_plan(workspace), True
+        entries, deny, fuzz = full_plan(workspace), True, True
     else:
         base, head = sys.argv[1], sys.argv[2]
         root = Path(__file__).resolve().parent.parent
@@ -304,11 +319,13 @@ def main() -> None:
         facade_e2e = root / workspace.dirs.get(FACADE_CRATE, "") / "tests" / "e2e.rs"
         entries = plan(files, workspace, graphs, e2e_modules(facade_e2e), lock_changed)
         deny = runs_deny(files)
+        fuzz = runs_fuzz(files, workspace)
         prefix = "::warning::" if os.environ.get("GITHUB_ACTIONS") == "true" else "warning: "
         for warning in shared_module_warnings(graphs):
             print(prefix + warning, file=sys.stderr)
     print(f"matrix={json.dumps(entries)}")
     print(f"deny={'true' if deny else 'false'}")
+    print(f"fuzz={'true' if fuzz else 'false'}")
 
 
 if __name__ == "__main__":

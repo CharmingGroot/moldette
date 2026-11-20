@@ -1,6 +1,6 @@
 import unittest
 
-from affected import Workspace, lock_changes, plan, runs_deny, shared_module_warnings
+from affected import Workspace, lock_changes, plan, runs_deny, runs_fuzz, shared_module_warnings
 
 CORE, PARSER, MAPPER, RESP = "moldette-core", "moldette-parser", "moldette-mapper", "moldette-resp"
 CONFIG, FACADE, TEST_TRACING = "moldette-config", "moldette", "moldette-test-tracing"
@@ -192,6 +192,19 @@ class PlanTest(unittest.TestCase):
             entry(CONFIG, "edge", "--test lowering -- lower::parser::kv:: lower::parser::spec::"),
             entry(PARSER, "full"),
         ])
+
+
+class RunsFuzzTest(unittest.TestCase):
+    def test_fuzz_targets_build_on_changes_to_the_facade_and_its_dependencies(self):
+        for path in ("fuzz/fuzz_targets/kv.rs", "crates/moldette-core/src/value.rs",
+                     "crates/moldette-parser/src/kv.rs", "crates/moldette/src/pipeline.rs",
+                     ".github/workflows/fuzz.yml"):
+            self.assertTrue(runs_fuzz([path], WORKSPACE), path)
+
+    def test_fuzz_targets_skip_changes_outside_the_facade_tree(self):
+        for path in ("crates/moldette-cli/src/run.rs", "crates/moldette-test-tracing/src/lib.rs",
+                     "examples/otlp/src/main.rs", "benches/pipeline/src/lib.rs", "docs/PLAN.md"):
+            self.assertFalse(runs_fuzz([path], WORKSPACE), path)
 
 
 class LockChangesTest(unittest.TestCase):
