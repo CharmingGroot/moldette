@@ -77,8 +77,10 @@ The same configuration can be checked and run from the command line:
 
 `check` reports what the configuration gets wrong and prints its lineage as
 JSON. `run` reads one record per line from a file or standard input and prints
-one JSON response per line; `explain` adds how each field was filled. Only
-built-in formats and operations are available from the command line.
+one JSON response per line; `explain` adds how each field was filled. Both
+process records on every available core, or on `--threads <n>`, and keep the
+input order. Only built-in formats and operations are available from the
+command line.
 
 Configuration examples for a JSON API response, a CSV export and an nginx
 access log are in `crates/moldette-config/tests/fixtures`. The
