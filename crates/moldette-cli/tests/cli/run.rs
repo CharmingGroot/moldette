@@ -86,7 +86,8 @@ fn fails_when_the_configuration_has_no_pipeline_sections() {
 #[test]
 fn fails_on_a_configuration_error_before_reading_input() {
     let config = format!("{FIXTURES}/errors.yaml");
-    let output = moldette_with_input(&["run", &config], b"{\"id\":\"A-1\"}\n");
+    let input = "{\"id\":\"A-1\"}\n".repeat(100_000);
+    let output = moldette_with_input(&["run", &config], input.as_bytes());
     assert_eq!(output.status.code(), Some(1));
     assert!(output.stdout.is_empty());
     assert!(stderr(&output).contains("error: "));

@@ -1,5 +1,6 @@
-use std::io::Write;
+use std::io::{ErrorKind, Write};
 use std::process::{Command, Output, Stdio};
+use std::thread;
 
 pub const CONFIG_FIXTURES: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -20,13 +21,15 @@ pub fn moldette_with_input(args: &[&str], input: &[u8]) -> Output {
         .stderr(Stdio::piped())
         .spawn()
         .expect("moldette starts");
-    child
-        .stdin
-        .take()
-        .expect("piped standard input")
-        .write_all(input)
-        .expect("input is written");
-    child.wait_with_output().expect("moldette finishes")
+    let mut stdin = child.stdin.take().expect("piped standard input");
+    let input = input.to_vec();
+    let writer = thread::spawn(move || match stdin.write_all(&input) {
+        Err(err) if err.kind() != ErrorKind::BrokenPipe => panic!("input is written: {err}"),
+        _ => {}
+    });
+    let output = child.wait_with_output().expect("moldette finishes");
+    writer.join().expect("input writer finishes");
+    output
 }
 
 pub fn stderr(output: &Output) -> String {
