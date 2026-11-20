@@ -17,3 +17,4 @@ path = "src/main.rs"
 [dependencies]
 moldette = { workspace = true }
 serde_json = "1.0.154"
+time = { version = "0.3.55", default-features = false, features = ["formatting"] }
