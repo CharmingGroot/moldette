@@ -7,6 +7,7 @@ mod lineage;
 mod load;
 mod response;
 mod run;
+mod value;
 
 use std::env;
 use std::ffi::OsString;

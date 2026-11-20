@@ -1,7 +1,7 @@
 use moldette::{Explain, ExplainRead, ExplainSource, ExplainStep};
 use serde_json::{Value, json};
 
-use crate::response::to_json_value;
+use crate::value::to_json_value;
 
 pub(crate) fn to_json(explain: &Explain<'_>) -> Value {
     json!({
