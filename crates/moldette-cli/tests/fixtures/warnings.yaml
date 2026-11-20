@@ -1,0 +1,18 @@
+schemas:
+  - name: order
+    version: 1
+    fields:
+      - {name: id, type: string, required: true}
+      - {name: total, type: float}
+
+parser:
+  format: json
+  fields:
+    id: /id
+    note: /note
+
+mapper:
+  schema: {name: order, version: 1}
+
+resp:
+  schema: {name: order, version: 1}

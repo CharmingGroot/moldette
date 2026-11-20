@@ -11,6 +11,7 @@ license = "Apache-2.0"
 repository = "https://github.com/CharmingGroot/moldette"
 
 [workspace.dependencies]
+moldette = { path = "crates/moldette", version = "0.3.0" }
 moldette-config = { path = "crates/moldette-config", version = "0.3.0" }
 moldette-core = { path = "crates/moldette-core", version = "0.3.0" }
 moldette-mapper = { path = "crates/moldette-mapper", version = "0.3.0" }
