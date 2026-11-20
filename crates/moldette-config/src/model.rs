@@ -59,18 +59,26 @@ pub struct ParserSection {
     pub fields: Vec<(String, String)>,
     pub bodies: Vec<BodyEntry>,
     pub empty_as_none: bool,
+    /// Texts read as absent, such as `-` (#95).
+    pub none_values: Vec<String>,
     pub(crate) field_positions: Vec<Option<Position>>,
 }
 
 impl PartialEq for ParserSection {
     fn eq(&self, other: &Self) -> bool {
-        (&self.format, &self.fields, &self.bodies, self.empty_as_none)
-            == (
-                &other.format,
-                &other.fields,
-                &other.bodies,
-                other.empty_as_none,
-            )
+        (
+            &self.format,
+            &self.fields,
+            &self.bodies,
+            self.empty_as_none,
+            &self.none_values,
+        ) == (
+            &other.format,
+            &other.fields,
+            &other.bodies,
+            other.empty_as_none,
+            &other.none_values,
+        )
     }
 }
 
@@ -210,7 +218,7 @@ pub struct RespSection {
     pub strict: bool,
 }
 
-const PARSER_KEYS: [&str; 4] = ["format", "fields", "bodies", "empty_as_none"];
+const PARSER_KEYS: [&str; 5] = ["format", "fields", "bodies", "empty_as_none", "none_values"];
 
 pub(crate) const BUILT_IN_FORMATS: [(&str, &[&str]); 4] = [
     ("json", &[]),
@@ -355,6 +363,11 @@ fn parser_section(map: &MapReader<'_>, format: FormatEntry) -> Result<ParserSect
             .transpose()?
             .unwrap_or_default(),
         empty_as_none: map.flag("empty_as_none")?,
+        none_values: map
+            .get("none_values")
+            .map(|cursor| cursor.list(|item| item.string()))
+            .transpose()?
+            .unwrap_or_default(),
     })
 }
 

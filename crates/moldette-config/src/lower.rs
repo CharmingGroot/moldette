@@ -234,6 +234,9 @@ fn parser_spec(
     if section.empty_as_none {
         builder = builder.empty_as_none();
     }
+    if !section.none_values.is_empty() {
+        builder = builder.none_values(&section.none_values);
+    }
     builder.build().map_err(|err| {
         let located = parser_error_path(section, path, &err);
         spec_error(err, located)
