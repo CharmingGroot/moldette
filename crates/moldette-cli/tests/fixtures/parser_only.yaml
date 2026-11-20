@@ -1,0 +1,10 @@
+schemas:
+  - name: order
+    version: 1
+    fields:
+      - {name: id, type: string, required: true}
+
+parser:
+  format: json
+  fields:
+    id: /id

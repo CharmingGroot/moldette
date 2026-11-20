@@ -1,19 +1,7 @@
-use std::process::{Command, Output};
+use std::process::Output;
 
+use super::{CONFIG_FIXTURES, FIXTURES, moldette, stderr};
 use serde_json::{Value, json};
-
-const CONFIG_FIXTURES: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../moldette-config/tests/fixtures"
-);
-const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures");
-
-fn moldette(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_moldette"))
-        .args(args)
-        .output()
-        .expect("moldette runs")
-}
 
 fn check(path: &str) -> Output {
     moldette(&["check", path])
@@ -21,10 +9,6 @@ fn check(path: &str) -> Output {
 
 fn stdout_json(output: &Output) -> Value {
     serde_json::from_slice(&output.stdout).expect("JSON on stdout")
-}
-
-fn stderr(output: &Output) -> String {
-    String::from_utf8(output.stderr.clone()).expect("UTF-8 on stderr")
 }
 
 #[test]
@@ -124,8 +108,10 @@ fn exits_with_usage_error_on_unknown_arguments() {
     for args in [
         &[][..],
         &["check"],
-        &["run", "config.yaml"],
         &["check", "a.yaml", "b.yaml"],
+        &["run"],
+        &["run", "a.yaml", "b.log", "c.log"],
+        &["convert", "a.yaml"],
     ] {
         let output = moldette(args);
         assert_eq!(output.status.code(), Some(2), "{args:?}");
