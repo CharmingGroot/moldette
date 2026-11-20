@@ -124,12 +124,18 @@ impl Encoder {
             fields,
             bodies,
             empty_as_none,
+            none_values,
             field_positions: _,
         } = section;
         self.format(format);
         self.pairs(fields);
         self.list(bodies, Self::body);
-        self.flag(*empty_as_none);
+        if none_values.is_empty() {
+            self.flag(*empty_as_none);
+        } else {
+            self.tag(u8::from(*empty_as_none) + 2);
+            self.list(none_values, |encoder, value| encoder.text(value));
+        }
     }
 
     fn format(&mut self, format: &FormatEntry) {

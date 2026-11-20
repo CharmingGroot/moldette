@@ -206,6 +206,39 @@ parser:
                 assert!(specs.schemas().is_empty());
                 assert!(specs.mapper().is_none() && specs.resp().is_none());
             }
+
+            #[test]
+            fn builds_none_values_of_a_section_and_its_bodies() {
+                let specs = build_yaml(
+                    r#"
+parser:
+  format: kv
+  pair_delimiter: " "
+  key_value_delimiter: "="
+  fields: {id: id}
+  none_values: ["-", "n/a"]
+  bodies:
+    - {path: detail, format: json, fields: {sku: /sku}, none_values: [""]}
+"#,
+                    &Registry::new(),
+                )
+                .expect("specs are built");
+                let body = ParserSpec::builder(Format::Json)
+                    .field("sku", "/sku")
+                    .none_values([""])
+                    .build()
+                    .expect("valid spec");
+                let expected = ParserSpec::builder(Format::Kv {
+                    pair_delimiter: ' ',
+                    key_value_delimiter: '=',
+                })
+                .field("id", "id")
+                .body("detail", body)
+                .none_values(["-", "n/a"])
+                .build()
+                .expect("valid spec");
+                assert_eq!(specs.parser(), Some(&expected));
+            }
         }
 
         mod regex {

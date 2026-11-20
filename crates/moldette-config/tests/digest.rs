@@ -107,6 +107,14 @@ fn digests_configurations_that_differ_differently() {
             "via: [{lookup: {table: {a: b}, keep_unmatched: true}}]",
         ),
         CSV_ORDERS.replace("via: [trim]", "via: [trim], default: '0'"),
+        CSV_ORDERS.replace(
+            r#"delimiter: ",""#,
+            "delimiter: \",\"\n  none_values: [\"-\"]",
+        ),
+        CSV_ORDERS.replace(
+            r#"delimiter: ",""#,
+            "delimiter: \",\"\n  none_values: [\"\"]",
+        ),
         CSV_ORDERS.replace("via: [trim]", "via: [trim], default: '1'"),
     ];
     let digests: HashSet<String> = variants.iter().map(|text| digest_yaml(text)).collect();

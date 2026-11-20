@@ -70,7 +70,8 @@ impl Format {
 /// built.
 ///
 /// Two specs are equal when they are built from equal formats, fields, bodies
-/// and `empty_as_none` settings, so a custom format must share its parser.
+/// and `empty_as_none` and `none_values` settings, so a custom format must
+/// share its parser.
 #[derive(Debug, Clone)]
 pub struct ParserSpec {
     format: Format,
@@ -79,6 +80,7 @@ pub struct ParserSpec {
     bodies: Vec<Body>,
     field_count: usize,
     empty_as_none: bool,
+    none_values: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -103,6 +105,7 @@ impl ParserSpec {
             fields: Vec::new(),
             bodies: Vec::new(),
             empty_as_none: false,
+            none_values: Vec::new(),
         }
     }
 
@@ -134,11 +137,9 @@ impl ParserSpec {
         values: &mut [Option<Cow<'t, str>>],
         sink: &mut dyn FnMut(&'s str, Cow<'t, str>),
     ) -> Result<(), Malformed> {
-        let mut values = values.iter_mut().map(|value| {
-            value
-                .take()
-                .filter(|value| !(self.empty_as_none && value.is_empty()))
-        });
+        let mut values = values
+            .iter_mut()
+            .map(|value| value.take().filter(|value| !self.is_none(value)));
         for ((name, _), value) in self.fields.iter().zip(values.by_ref()) {
             if let Some(value) = value {
                 sink(name, value);
@@ -158,6 +159,11 @@ impl ParserSpec {
         Ok(())
     }
 
+    fn is_none(&self, value: &str) -> bool {
+        (self.empty_as_none && value.is_empty())
+            || self.none_values.iter().any(|none| none == value)
+    }
+
     fn collect_names<'s>(&'s self, names: &mut Vec<&'s str>) {
         names.extend(self.fields.iter().map(|(name, _)| name.as_str()));
         for body in &self.bodies {
@@ -172,6 +178,7 @@ impl PartialEq for ParserSpec {
             && self.fields == other.fields
             && self.bodies == other.bodies
             && self.empty_as_none == other.empty_as_none
+            && self.none_values == other.none_values
     }
 }
 
@@ -209,6 +216,7 @@ pub struct ParserSpecBuilder {
     fields: Vec<(String, String)>,
     bodies: Vec<(String, ParserSpec)>,
     empty_as_none: bool,
+    none_values: Vec<String>,
 }
 
 impl ParserSpecBuilder {
@@ -231,6 +239,14 @@ impl ParserSpecBuilder {
     /// own setting to its fields.
     pub fn empty_as_none(mut self) -> Self {
         self.empty_as_none = true;
+        self
+    }
+
+    /// Leaves texts equal to one of `values`, such as `-`, absent instead of
+    /// returning them as values (#95). The texts at body paths are covered
+    /// as with [`empty_as_none`](Self::empty_as_none).
+    pub fn none_values(mut self, values: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.none_values = values.into_iter().map(Into::into).collect();
         self
     }
 
@@ -265,6 +281,7 @@ impl ParserSpecBuilder {
                 .collect(),
             field_count,
             empty_as_none: self.empty_as_none,
+            none_values: self.none_values,
         })
     }
 }
@@ -482,6 +499,63 @@ mod tests {
             let record = spec.parse(raw).expect("valid record");
             assert_eq!(fields(&record), [("order_id", "A-1")], "{raw:?}");
         }
+    }
+
+    #[test]
+    fn none_values_leave_matching_texts_absent() {
+        let access = regex(r"^(?P<user>\S+) (?P<bytes>\S+) (?P<agent>.*)$");
+        let spec = ParserSpec::builder(access.clone())
+            .field("user", "user")
+            .field("bytes", "bytes")
+            .field("agent", "agent")
+            .none_values(["-", "n/a"])
+            .build()
+            .expect("valid spec");
+        let cases = [
+            ("- - curl", vec![("agent", "curl")]),
+            ("alice 512 n/a", vec![("user", "alice"), ("bytes", "512")]),
+            (
+                "alice -1 --",
+                vec![("user", "alice"), ("bytes", "-1"), ("agent", "--")],
+            ),
+        ];
+        for (raw, expected) in cases {
+            let record = spec.parse(raw).expect("valid record");
+            assert_eq!(fields(&record), expected, "{raw:?}");
+        }
+
+        let both = ParserSpec::builder(CSV)
+            .field("user", "0")
+            .field("note", "1")
+            .empty_as_none()
+            .none_values(["-"])
+            .build()
+            .expect("valid spec");
+        assert_eq!(fields(&both.parse("-,").expect("valid record")), []);
+
+        let without = ParserSpec::builder(access)
+            .field("user", "user")
+            .build()
+            .expect("valid spec");
+        assert_ne!(spec, without);
+        assert_eq!(
+            fields(&without.parse("- - curl").expect("valid record")),
+            [("user", "-")]
+        );
+    }
+
+    #[test]
+    fn none_values_cover_the_text_at_a_body_path() {
+        let header = ParserSpec::builder(CSV)
+            .field("id", "0")
+            .body("1", spec(Format::Json, &[("sku", "/sku")]))
+            .none_values(["-"])
+            .build()
+            .expect("valid spec");
+        let record = header
+            .parse("A-1,-")
+            .expect("absent body text is not parsed");
+        assert_eq!(fields(&record), [("id", "A-1")]);
     }
 
     #[test]
