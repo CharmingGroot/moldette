@@ -19,7 +19,8 @@ Out of scope:
 - enrichment that needs an external lookup
 - anything spanning more than one record (aggregation, joins)
 
-moldette is a Rust library. A sidecar and language bindings follow the core
+moldette is a Rust library. A command-line tool runs a configuration over
+files or standard input (#84). A sidecar and language bindings follow the core
 (#2).
 
 ## Layers
@@ -59,6 +60,8 @@ parser  mapper  resp          each depends on core only
 moldette-config     configuration -> specs, cross-layer checks, lineage
    ^
 moldette            pipeline facade, layers selected by feature
+   ^
+moldette-cli        `moldette` binary: check, run, explain
 ```
 
 ## Built-in components
@@ -79,16 +82,18 @@ expression language (#4).
 | errors | rule errors at spec build (`SpecError`); data errors as values per record | #3 |
 | concurrency | specs and plans immutable, `Send + Sync`; processing takes `&self`; no threads spawned | #8 |
 | observability | library crates emit `tracing` signals only; exporters belong to the caller | #7 |
-| portability | no I/O, no global state; every crate builds for `wasm32-unknown-unknown` | #2 |
+| portability | no I/O, no global state; every library crate builds for `wasm32-unknown-unknown`; `moldette-cli` is host only | #2, #84 |
 | CI | each affected crate checked on its own | #9 |
 | toolchain | library crates declare `rust-version`, checked in CI | #78 |
+| fuzzing | parser formats and pipeline `process` fuzzed with `cargo-fuzz`; no panic on any input | #84 |
 | publishing | crates published from 0.3.0 on, in dependency order | #10 |
 
 ## Milestones
 
 Each layer milestone starts with its standalone API and ends with tests that
 use core types only. M0 to M5 make up v0.1 (tag `v0.1.0`); the v0.2
-improvements are tagged `v0.2.0` and the first public release `v0.3.0`.
+improvements are tagged `v0.2.0`, the first public release `v0.3.0` and the
+CLI release `v0.4.0`.
 
 ### M0 core
 
@@ -161,11 +166,20 @@ improvements are tagged `v0.2.0` and the first public release `v0.3.0`.
 4. OpenSSF Scorecard workflow, which runs once the repository is public
 5. in order, each confirmed by the maintainer first (#10): public repository; repository settings that need a public repository (ruleset for `main`, private vulnerability reporting, secret scanning); crates.io release 0.3.0 in dependency order
 
-## After v0.3
+### v0.4 CLI and fuzzing
+
+1. `moldette-cli` crate with `check`: validation report and lineage, non-zero exit on errors (#84)
+2. `run`: one record per line from a file or standard input, one JSON `Response` per line, status counts at the end
+3. `explain`: `run` with the explain record of each record
+4. fuzz targets for `json`, `delimited`, `regex`, `kv`, header + body composition and pipeline `process`, seeded from test fixtures
+5. fuzzing in CI: weekly and manual runs per target; fuzz targets built on pull requests
+6. release 0.4.0, confirmed by the maintainer first: library crates through trusted publishing; `moldette-cli` published first by the maintainer, then added to trusted publishing (#10)
+7. OpenSSF Scorecard follow-ups: `SECURITY.md` with the reporting channel, response time and supported versions; CodeQL analysis on pull requests and `main`
+
+## After v0.4
 
 | Item | Content |
 |---|---|
-| CLI | `check`, `run`, `explain` |
 | Parallel batch | optional `rayon` feature |
 | Ports | sidecar (HTTP / gRPC, OTLP export), JVM (UniFFI or WASM on Chicory), Python (PyO3), sandboxed WASM user ops |
 | Supply chain | artifact attestations at the first binary release |
