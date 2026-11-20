@@ -115,6 +115,10 @@ fn exits_with_usage_error_on_unknown_arguments() {
         &["explain"],
         &["explain", "a.yaml", "b.log", "c.log"],
         &["convert", "a.yaml"],
+        &["run", "--threads", "0", "a.yaml"],
+        &["run", "--threads", "two", "a.yaml"],
+        &["run", "a.yaml", "--threads"],
+        &["check", "--threads", "2", "a.yaml"],
     ] {
         let output = moldette(args);
         assert_eq!(output.status.code(), Some(2), "{args:?}");
