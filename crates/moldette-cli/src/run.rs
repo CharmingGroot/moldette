@@ -6,9 +6,14 @@ use std::process::ExitCode;
 
 use moldette::{Pipeline, Response};
 
-use crate::{load, response};
+use crate::{explain, load, response};
 
-pub(crate) fn run(config: &Path, input: Option<&Path>) -> ExitCode {
+pub(crate) enum Mode {
+    Run,
+    Explain,
+}
+
+pub(crate) fn run(config: &Path, input: Option<&Path>, mode: Mode) -> ExitCode {
     let specs = match load::specs(config) {
         Ok(specs) => specs,
         Err(code) => return code,
@@ -41,9 +46,23 @@ pub(crate) fn run(config: &Path, input: Option<&Path>) -> ExitCode {
                 return ExitCode::FAILURE;
             }
         };
-        let response = pipeline.process(&line);
-        counts.add(&response);
-        if let Err(err) = write_line(&mut output, &response::to_json(&response)) {
+        let printed = match mode {
+            Mode::Run => {
+                let response = pipeline.process(&line);
+                counts.add(&response);
+                response::to_json(&response)
+            }
+            Mode::Explain => {
+                let (response, record) = pipeline.explain(&line);
+                counts.add(&response);
+                let mut printed = response::to_json(&response);
+                printed["explain"] = record
+                    .as_ref()
+                    .map_or(serde_json::Value::Null, explain::to_json);
+                printed
+            }
+        };
+        if let Err(err) = write_line(&mut output, &printed) {
             return write_failure(&err);
         }
     }

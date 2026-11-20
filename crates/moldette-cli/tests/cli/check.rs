@@ -111,6 +111,8 @@ fn exits_with_usage_error_on_unknown_arguments() {
         &["check", "a.yaml", "b.yaml"],
         &["run"],
         &["run", "a.yaml", "b.log", "c.log"],
+        &["explain"],
+        &["explain", "a.yaml", "b.log", "c.log"],
         &["convert", "a.yaml"],
     ] {
         let output = moldette(args);

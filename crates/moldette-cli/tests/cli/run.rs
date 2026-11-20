@@ -4,7 +4,7 @@ use std::process::Output;
 use super::{CONFIG_FIXTURES, DATA, FIXTURES, moldette, moldette_with_input, stderr};
 use serde_json::{Value, json};
 
-fn responses(output: &Output) -> Vec<Value> {
+pub(crate) fn responses(output: &Output) -> Vec<Value> {
     String::from_utf8_lossy(&output.stdout)
         .lines()
         .map(|line| serde_json::from_str(line).expect("one JSON response per line"))
