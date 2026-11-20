@@ -179,7 +179,7 @@ improvements are tagged `v0.2.0` and the first public release `v0.3.0`.
 | commit messages | Conventional Commits, imperative mood, signed off (`-s`) |
 | pull request body | becomes the squash commit message: background, then changes |
 | pull request scope | one milestone item per pull request |
-| releases | `vX.Y.Z` tags on `main`; `0.x` until the core contracts are stable |
+| releases | `vX.Y.Z` tags on `main`; `0.x` until the core contracts are stable; a tag publishes the library crates through trusted publishing after the maintainer approves the `crates-io` environment (#10) |
 
 ## Contributing
 
