@@ -20,6 +20,7 @@ pub struct Rule {
     source: Source,
     fallback: Option<String>,
     via: Vec<DeclaredOp>,
+    default: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,6 +59,7 @@ impl Rule {
             source,
             fallback: None,
             via: Vec::new(),
+            default: None,
         }
     }
 
@@ -65,6 +67,15 @@ impl Rule {
     /// The ops of the rule run on it as well.
     pub fn fallback(mut self, from: impl Into<String>) -> Self {
         self.fallback = Some(from.into());
+        self
+    }
+
+    /// Takes `value` when no source text is read, without running the ops. A
+    /// text the ops or the conversion reject still leaves the field emptied
+    /// (#95). The build fails when `value` does not convert to the field's
+    /// schema type.
+    pub fn default(mut self, value: impl Into<String>) -> Self {
+        self.default = Some(value.into());
         self
     }
 
@@ -145,9 +156,14 @@ impl Rule {
         self
     }
 
-    pub(crate) fn compile(self) -> Result<CompiledRule, SpecError> {
+    pub(crate) fn compile(self, ty: Type) -> Result<CompiledRule, SpecError> {
         if matches!(&self.source, Source::Coalesce(from) if from.is_empty()) {
             return Err(invalid_argument("coalesce.from", ""));
+        }
+        if let Some(value) = &self.default
+            && coerce(Cow::Borrowed(value), ty).is_none()
+        {
+            return Err(invalid_argument("default", value));
         }
         let via = self
             .via
@@ -195,6 +211,11 @@ impl CompiledRule {
                 .and_then(|name| read_field(name, record, recorder));
             found |= fallback.is_some();
             value = fallback.and_then(|text| self.convert(text, field.ty(), recorder));
+        }
+        if let (false, Some(default)) = (found, &self.declared.default) {
+            recorder.constant(default);
+            value = coerce(Cow::Borrowed(default.as_str()), field.ty());
+            recorder.coerced(value.as_ref());
         }
         match value {
             Some(value) => mapped.insert(field.name(), value),

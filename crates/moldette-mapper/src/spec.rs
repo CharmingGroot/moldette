@@ -103,9 +103,11 @@ impl MapperSpecBuilder {
             .iter()
             .map(
                 |field| match declared.iter().position(|r| r.target == field.name()) {
-                    Some(i) => declared.swap_remove(i).compile().map(Some),
+                    Some(i) => declared.swap_remove(i).compile(field.ty()).map(Some),
                     None if self.explicit_rules => Ok(None),
-                    None => Rule::new(field.name(), field.name()).compile().map(Some),
+                    None => Rule::new(field.name(), field.name())
+                        .compile(field.ty())
+                        .map(Some),
                 },
             )
             .collect::<Result<_, _>>()?;
@@ -878,6 +880,96 @@ mod tests {
                 ),
                 explained_field("paid", [explained(field("paid"), Some("yes"), &[], None)],),
             ]
+        );
+    }
+
+    #[test]
+    fn default_applies_only_when_no_source_text_is_read() {
+        let schema = OutputSchema::builder("event", 1)
+            .field(Field::new("outcome", Type::String))
+            .field(Field::new("attempts", Type::Int))
+            .build()
+            .expect("valid schema");
+        let spec = MapperSpec::builder(schema)
+            .rule(
+                Rule::new("outcome", "error")
+                    .lookup_with([("", "unused")], Unmatched::Value("failure".into()))
+                    .default("success"),
+            )
+            .rule(
+                Rule::new("attempts", "tries")
+                    .fallback("retries")
+                    .extract(r"^(\d+)$")
+                    .default("0"),
+            )
+            .build()
+            .expect("valid rules");
+        let cases = [
+            (vec![], Some("success"), Some(0), vec![]),
+            (
+                vec![("error", "AccessDenied"), ("retries", "3")],
+                Some("failure"),
+                Some(3),
+                vec![],
+            ),
+            (
+                vec![("tries", "x")],
+                Some("success"),
+                None,
+                vec!["attempts"],
+            ),
+        ];
+        for (fields, outcome, attempts, emptied) in cases {
+            let mapped = spec.map(&record(&fields));
+            assert_eq!(
+                mapped.get("outcome"),
+                outcome.map(|text| Value::Str(text.into())).as_ref(),
+                "{fields:?}"
+            );
+            assert_eq!(
+                mapped.get("attempts"),
+                attempts.map(Value::Int).as_ref(),
+                "{fields:?}"
+            );
+            assert_eq!(mapped.emptied().collect::<Vec<_>>(), emptied, "{fields:?}");
+        }
+    }
+
+    #[test]
+    fn rejects_a_default_that_does_not_convert_to_the_field_type() {
+        let result = MapperSpec::builder(order_schema())
+            .rule(Rule::new("quantity", "qty").default("one"))
+            .build();
+        assert_eq!(
+            result,
+            Err(SpecError::InvalidArgument {
+                name: "default".into(),
+                value: "one".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn explain_records_a_default_as_a_constant_read() {
+        let spec = MapperSpec::builder(order_schema())
+            .rule(Rule::new("quantity", "qty").trim().default("1"))
+            .explicit_rules()
+            .build()
+            .expect("valid rule");
+        let record = record(&[]);
+
+        let (mapped, explain) = spec.explain(&record);
+
+        assert_eq!(mapped, spec.map(&record));
+        assert_eq!(
+            explain.field("quantity"),
+            Some(&explained_field(
+                "quantity",
+                [
+                    explained(ExplainSource::Field(Cow::Borrowed("qty")), None, &[], None),
+                    explained(ExplainSource::Constant, Some("1"), &[], Some(Value::Int(1))),
+                ],
+            ))
         );
     }
 

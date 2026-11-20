@@ -136,6 +136,8 @@ pub struct RuleEntry {
     pub source: SourceEntry,
     pub fallback: Option<String>,
     pub via: Vec<OpEntry>,
+    /// The value taken when no source text is read (#95).
+    pub default: Option<String>,
     pub(crate) target_position: Option<Position>,
     pub(crate) source_positions: Vec<Option<Position>>,
     pub(crate) fallback_position: Option<Position>,
@@ -143,8 +145,19 @@ pub struct RuleEntry {
 
 impl PartialEq for RuleEntry {
     fn eq(&self, other: &Self) -> bool {
-        (&self.target, &self.source, &self.fallback, &self.via)
-            == (&other.target, &other.source, &other.fallback, &other.via)
+        (
+            &self.target,
+            &self.source,
+            &self.fallback,
+            &self.via,
+            &self.default,
+        ) == (
+            &other.target,
+            &other.source,
+            &other.fallback,
+            &other.via,
+            &other.default,
+        )
     }
 }
 
@@ -389,7 +402,9 @@ fn schema_ref(cursor: Cursor<'_>) -> Result<SchemaRef, LoadError> {
 
 fn rule(cursor: Cursor<'_>) -> Result<RuleEntry, LoadError> {
     let map = cursor.map()?;
-    map.allow(&["target", "from", "coalesce", "constant", "fallback", "via"])?;
+    map.allow(&[
+        "target", "from", "coalesce", "constant", "fallback", "via", "default",
+    ])?;
     let (source, source_positions) = match map.one_of(&["from", "coalesce", "constant"])? {
         ("from", cursor) => (
             SourceEntry::From(cursor.string()?),
@@ -418,6 +433,10 @@ fn rule(cursor: Cursor<'_>) -> Result<RuleEntry, LoadError> {
             .map(|cursor| cursor.list(op))
             .transpose()?
             .unwrap_or_default(),
+        default: map
+            .get("default")
+            .map(|cursor| cursor.string())
+            .transpose()?,
     })
 }
 

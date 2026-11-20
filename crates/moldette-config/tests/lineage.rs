@@ -251,3 +251,14 @@ fn traces_only_with_a_mapper_section() {
         )
     );
 }
+
+#[test]
+fn records_the_default_of_a_rule() {
+    let config = format!(
+        "{ORDER_SCHEMA}mapper:\n  schema: {{name: order, version: 1}}\n  rules:\n    - {{target: amount, from: total, default: '0'}}\n"
+    );
+    let lineage = lineage_yaml(&config, &Registry::new());
+    let field = |name| lineage.field(name).expect("field has a lineage");
+    assert_eq!(field("amount").default(), Some("0"));
+    assert_eq!(field("id").default(), None);
+}

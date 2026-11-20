@@ -328,6 +328,11 @@ parser:
                         "mapper.rules[0].via[1].timestamp.year",
                     ),
                     (
+                        "    - {target: id, from: id}\n    - {target: amount, from: total, default: none}\n",
+                        spec(invalid_argument("default", "none")),
+                        "mapper.rules[1].default",
+                    ),
+                    (
                         "    - target: placed_at\n      from: time\n      via: [{timestamp: {formats: ['[month repr:short] [day]'], offset: '09:00'}}]\n",
                         spec(invalid_argument("timestamp.offset", "09:00")),
                         "mapper.rules[0].via[0].timestamp.offset",
@@ -468,6 +473,39 @@ mapper:
                             .lookup_with(no_entries, Unmatched::Value("failure".into())),
                     )
                     .rule(Rule::new("kind", "id").lookup([("1", "create")]))
+                    .build()
+                    .expect("valid spec");
+                assert_eq!(specs.mapper(), Some(&expected));
+            }
+
+            #[test]
+            fn builds_rule_defaults() {
+                let specs = build_yaml(
+                    r#"
+schemas:
+  - {name: event, version: 1, fields: [{name: outcome, type: string}, {name: attempts, type: int}]}
+mapper:
+  schema: {name: event, version: 1}
+  rules:
+    - {target: outcome, from: error, via: [{lookup: {table: {}, default: failure}}], default: success}
+    - {target: attempts, coalesce: [tries, retries], default: "0"}
+"#,
+                    &Registry::new(),
+                )
+                .expect("specs are built");
+                let schema = OutputSchema::builder("event", 1)
+                    .field(Field::new("outcome", Type::String))
+                    .field(Field::new("attempts", Type::Int))
+                    .build()
+                    .expect("valid schema");
+                let no_entries: [(&str, &str); 0] = [];
+                let expected = MapperSpec::builder(schema)
+                    .rule(
+                        Rule::new("outcome", "error")
+                            .lookup_with(no_entries, Unmatched::Value("failure".into()))
+                            .default("success"),
+                    )
+                    .rule(Rule::coalesce("attempts", ["tries", "retries"]).default("0"))
                     .build()
                     .expect("valid spec");
                 assert_eq!(specs.mapper(), Some(&expected));

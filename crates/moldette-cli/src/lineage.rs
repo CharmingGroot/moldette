@@ -15,6 +15,7 @@ fn field(field: &LineageField) -> Value {
         "source": source(field.source()),
         "reads": field.reads().iter().map(read).collect::<Vec<_>>(),
         "ops": field.ops(),
+        "default": field.default(),
     })
 }
 
