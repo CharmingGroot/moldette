@@ -68,8 +68,8 @@ moldette-cli        `moldette` binary: check, run, explain
 
 | Layer | Components |
 |---|---|
-| parser | `json`, `delimited`, `regex`, `kv`, header + body composition |
-| mapper | rule keys `target`, `from`, `coalesce`, `constant`, `via`, `fallback` (#14); ops `trim`, `split`, `extract`, `lookup`, `timestamp`, `empty_as_none`; implicit coercion to string, int, float, bool, timestamp, ip; `explain` (#6, #39) |
+| parser | `json`, `delimited`, `regex`, `kv`, header + body composition; `empty_as_none`, `none_values` (#95) |
+| mapper | rule keys `target`, `from`, `coalesce`, `constant`, `via`, `fallback` (#14), `default` (#95); ops `trim`, `split`, `extract`, `lookup` (`default`, `keep_unmatched`), `timestamp` (`year`, `offset`), `empty_as_none`; implicit coercion to string, int, float, bool, timestamp, ip; `explain` (#6, #39) |
 | resp | statuses `Ok`, `Malformed`, `MissingRequired`, `Emptied` (strict mode, #5); strict mode |
 
 Custom parsers and ops are registered as Rust types. Configuration has no
