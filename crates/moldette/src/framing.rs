@@ -195,6 +195,7 @@ fn frame_lines(
 struct JsonScanner {
     array: Array,
     value: Option<Value>,
+    closers: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -212,7 +213,6 @@ enum Array {
 struct Value {
     start: usize,
     scanned: usize,
-    depth: usize,
     in_string: bool,
     escaped: bool,
     scalar: bool,
@@ -229,7 +229,7 @@ impl JsonScanner {
         let mut position = self.value.map_or(0, |value| value.scanned);
         loop {
             if let Some(current) = &mut self.value {
-                match scan_value(bytes, position, current) {
+                match scan_value(bytes, position, current, &mut self.closers)? {
                     Some(close) => {
                         let start = current.start;
                         if close - start > max_len {
@@ -253,7 +253,7 @@ impl JsonScanner {
                             current.start = 0;
                             return Ok(start);
                         }
-                        if !current.scalar || current.depth > 0 || current.in_string {
+                        if !current.scalar || !self.closers.is_empty() || current.in_string {
                             return Err(FrameErrorKind::UnterminatedJson);
                         }
                         let start = current.start;
@@ -296,7 +296,6 @@ impl JsonScanner {
                     self.value = Some(Value {
                         start: position,
                         scanned: position,
-                        depth: 0,
                         in_string: false,
                         escaped: false,
                         scalar: !matches!(byte, b'{' | b'[' | b'"'),
@@ -317,12 +316,19 @@ impl JsonScanner {
 }
 
 /// Scans the value from `from` and returns the end of its text once it is
-/// complete. A scalar ends before the first byte that cannot continue it.
-fn scan_value(bytes: &[u8], from: usize, value: &mut Value) -> Option<usize> {
+/// complete. A scalar ends before the first byte that cannot continue it, and
+/// a closing bracket must match the innermost open one.
+fn scan_value(
+    bytes: &[u8],
+    from: usize,
+    value: &mut Value,
+    closers: &mut Vec<u8>,
+) -> Result<Option<usize>, FrameErrorKind> {
     for (index, &byte) in bytes.iter().enumerate().skip(from) {
         if value.scalar {
-            if byte.is_ascii_whitespace() || matches!(byte, b',' | b']' | b'}') {
-                return Some(index);
+            if byte.is_ascii_whitespace() || matches!(byte, b',' | b']' | b'}' | b'{' | b'[' | b'"')
+            {
+                return Ok(Some(index));
             }
             continue;
         }
@@ -332,8 +338,8 @@ fn scan_value(bytes: &[u8], from: usize, value: &mut Value) -> Option<usize> {
                 (false, b'\\') => value.escaped = true,
                 (false, b'"') => {
                     value.in_string = false;
-                    if value.depth == 0 {
-                        return Some(index + 1);
+                    if closers.is_empty() {
+                        return Ok(Some(index + 1));
                     }
                 }
                 _ => {}
@@ -342,17 +348,20 @@ fn scan_value(bytes: &[u8], from: usize, value: &mut Value) -> Option<usize> {
         }
         match byte {
             b'"' => value.in_string = true,
-            b'{' | b'[' => value.depth += 1,
+            b'{' => closers.push(b'}'),
+            b'[' => closers.push(b']'),
             b'}' | b']' => {
-                value.depth = value.depth.saturating_sub(1);
-                if value.depth == 0 {
-                    return Some(index + 1);
+                if closers.pop() != Some(byte) {
+                    return Err(FrameErrorKind::UnexpectedJson(byte));
+                }
+                if closers.is_empty() {
+                    return Ok(Some(index + 1));
                 }
             }
             _ => {}
         }
     }
-    None
+    Ok(None)
 }
 
 /// Why framing stopped, and at which record, counted from 1.
@@ -386,7 +395,8 @@ pub enum FrameErrorKind {
     InvalidUtf8,
     /// The record is longer than this limit in bytes.
     TooLong(usize),
-    /// A byte that cannot appear here between JSON values.
+    /// A byte that cannot appear here: between JSON values, or a closing
+    /// bracket that does not match the open one.
     UnexpectedJson(u8),
     /// The input ends inside a JSON value or array.
     UnterminatedJson,
@@ -555,6 +565,63 @@ mod tests {
     }
 
     #[test]
+    fn json_separates_adjacent_values_and_reads_escapes() {
+        let json = Framer::json();
+        assert_eq!(
+            records(&json, r#"{"a":1}{"b":2}"#),
+            [r#"{"a":1}"#, r#"{"b":2}"#]
+        );
+        assert_eq!(records(&json, r#""a\\" 1"#), [r#""a\\""#, "1"]);
+        assert_eq!(
+            records(&json, r#"1{"a":1}2"x""#),
+            ["1", r#"{"a":1}"#, "2", r#""x""#]
+        );
+    }
+
+    #[test]
+    fn json_stops_at_a_bracket_that_does_not_match() {
+        let json = Framer::json();
+        assert_eq!(
+            error(&json, b"{]"),
+            (vec![], FrameErrorKind::UnexpectedJson(b']'), 1)
+        );
+        assert_eq!(
+            error(&json, br#"{"a":[1} {"b":2}"#),
+            (vec![], FrameErrorKind::UnexpectedJson(b'}'), 1)
+        );
+        assert_eq!(
+            error(&json, br#"[{"a":1]"#),
+            (vec![], FrameErrorKind::UnexpectedJson(b']'), 1)
+        );
+    }
+
+    #[test]
+    fn json_fails_an_array_left_open() {
+        let json = Framer::json();
+        let one = || vec!["1".to_owned()];
+        assert_eq!(
+            error(&json, b"["),
+            (vec![], FrameErrorKind::UnterminatedJson, 1)
+        );
+        assert_eq!(
+            error(&json, b"[1"),
+            (one(), FrameErrorKind::UnterminatedJson, 2)
+        );
+        assert_eq!(
+            error(&json, br#"[{"a":1}"#),
+            (
+                vec![r#"{"a":1}"#.to_owned()],
+                FrameErrorKind::UnterminatedJson,
+                2
+            )
+        );
+        assert_eq!(
+            error(&json, b"[1,"),
+            (one(), FrameErrorKind::UnterminatedJson, 2)
+        );
+    }
+
+    #[test]
     fn records_longer_than_the_limit_fail() {
         assert_eq!(
             error(&Framer::lines().max_record_len(3), b"abc\nabcd\n"),
@@ -578,6 +645,26 @@ mod tests {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<Framer>();
         assert_send_sync::<FrameError>();
+    }
+
+    #[test]
+    fn an_unfinished_record_fails_once_it_passes_the_limit() {
+        let mut ignore = |_: &str| {};
+        let unfinished: [(Framer, &[u8]); 3] = [
+            (Framer::lines(), b"abcdefgh"),
+            (
+                Framer::multiline("^S").expect("valid pattern"),
+                b"S1\n 22\n 333\n",
+            ),
+            (Framer::json(), br#"{"a":"xxxxxxxx"#),
+        ];
+        for (framer, input) in unfinished {
+            let mut framer = framer.max_record_len(5);
+            let error = framer
+                .push(input, &mut ignore)
+                .expect_err("record over the limit");
+            assert_eq!(error.kind(), &FrameErrorKind::TooLong(5), "{input:?}");
+        }
     }
 
     #[test]
