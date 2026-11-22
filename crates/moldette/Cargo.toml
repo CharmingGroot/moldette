@@ -16,6 +16,7 @@ moldette-core = { workspace = true }
 moldette-mapper = { workspace = true, optional = true }
 moldette-parser = { workspace = true, optional = true }
 moldette-resp = { workspace = true, optional = true }
+regex = { version = "1.13.1", optional = true }
 
 [dev-dependencies]
 moldette-test-tracing = { path = "../moldette-test-tracing" }
@@ -28,6 +29,7 @@ mapper = ["dep:moldette-mapper"]
 resp = ["dep:moldette-resp"]
 config = ["dep:moldette-config", "parser", "mapper", "resp"]
 tracing = ["moldette-parser?/tracing", "moldette-mapper?/tracing", "moldette-resp?/tracing"]
+framing = ["dep:regex"]
 
 [package.metadata.docs.rs]
 all-features = true

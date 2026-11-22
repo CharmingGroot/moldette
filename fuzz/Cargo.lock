@@ -181,6 +181,7 @@ dependencies = [
  "moldette-mapper",
  "moldette-parser",
  "moldette-resp",
+ "regex",
 ]
 
 [[package]]
