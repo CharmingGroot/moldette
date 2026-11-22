@@ -8,6 +8,7 @@ as issues labeled `type:decision`; filter by `layer:*` or `area:*`.
 
 In scope:
 
+- splitting an input stream into raw records: lines, multi-line records, JSON values (#103)
 - parsing a raw record into named fields
 - mapping those fields onto a declared output schema
 - returning the result, or the reason it failed, as a value
@@ -20,7 +21,8 @@ Out of scope:
 - anything spanning more than one record (aggregation, joins)
 
 moldette is a Rust library. A command-line tool runs a configuration over
-files or standard input (#84). A sidecar and language bindings follow the core
+files or standard input (#84), and a sidecar processes records over HTTP from
+a container in the application's pod (#103). Language bindings follow later
 (#2).
 
 ## Layers
@@ -59,9 +61,9 @@ parser  mapper  resp          each depends on core only
    ^      ^      ^
 moldette-config     configuration -> specs, cross-layer checks, lineage
    ^
-moldette            pipeline facade, layers selected by feature
-   ^
-moldette-cli        `moldette` binary: check, run, explain
+moldette            pipeline facade, layers selected by feature; record framing
+   ^           ^
+moldette-cli   moldette-sidecar    `moldette` binary; record processing over HTTP, container image
 ```
 
 ## Built-in components
@@ -82,7 +84,7 @@ expression language (#4).
 | errors | rule errors at spec build (`SpecError`); data errors as values per record | #3 |
 | concurrency | specs and plans immutable, `Send + Sync`; processing takes `&self`; no threads spawned | #8 |
 | observability | library crates emit `tracing` signals only; exporters belong to the caller | #7 |
-| portability | no I/O, no global state; every library crate builds for `wasm32-unknown-unknown`; `moldette-cli` is host only | #2, #84 |
+| portability | no I/O, no global state; every library crate builds for `wasm32-unknown-unknown`; `moldette-cli` and `moldette-sidecar` are host only | #2, #84, #103 |
 | CI | each affected crate checked on its own | #9 |
 | toolchain | library crates declare `rust-version`, checked in CI | #78 |
 | fuzzing | parser formats and pipeline `process` fuzzed with `cargo-fuzz`; no panic on any input | #84 |
@@ -93,7 +95,8 @@ expression language (#4).
 Each layer milestone starts with its standalone API and ends with tests that
 use core types only. M0 to M5 make up v0.1 (tag `v0.1.0`); the v0.2
 improvements are tagged `v0.2.0`, the first public release `v0.3.0`, the
-CLI release `v0.4.0` and the configuration and parallel CLI release `v0.5.0`.
+CLI release `v0.4.0`, the configuration and parallel CLI release `v0.5.0`
+and the first users, input shapes and sidecar release `v0.6.0`.
 
 ### M0 core
 
@@ -186,13 +189,25 @@ CLI release `v0.4.0` and the configuration and parallel CLI release `v0.5.0`.
 6. regex parser: cost per record measured, improvement decided from the result
 7. the public log samples of #95 normalized again and compared with 0.4.0; release 0.5.0, confirmed by the maintainer first
 
-## After v0.5
+### v0.6 first users, input shapes and sidecar
+
+1. `moldette::framing`: record framing without I/O for `lines`, `multiline` (a record start pattern) and `json` (concatenated values or the elements of a top-level array), fed text in chunks (#103)
+2. CLI `--records <lines|multiline|json>` and `--record-start <pattern>`; input files ending in `.gz` decompressed
+3. `moldette-sidecar`: a separate binary run in the application's pod, with one configuration loaded at start; `POST /v1/process` frames the streamed request body into records, processes them in parallel and streams NDJSON responses in input order; `GET /healthz` and `GET /readyz` for probes; no explain or lineage, which the CLI covers; listening on `127.0.0.1` by default, with limits on request size and processing time
+4. sidecar container image: distroless static with the sidecar binary only, run as a non-root user on a read-only file system, for `linux/amd64` and `linux/arm64`, pushed to GHCR from tags with artifact attestations; a Kubernetes example with the sidecar in a pod and a restricted security context
+5. `docs/CONFIGURATION.md`: every configuration key and op argument, with the example YAML checked by tests
+6. `examples/configs/`: configurations, inputs and expected outputs for an access log, syslog, a JSON API response and a CSV export, run by the CLI in CI
+7. `CHANGELOG.md` and the 0.x compatibility rule: minor versions may change the public API, the configuration format and the CLI output; patch versions do not
+8. CLI binaries for Linux (x86_64, aarch64), macOS (x86_64, aarch64) and Windows (x86_64), attached to GitHub Releases from tags with checksums and artifact attestations
+9. release 0.6.0, confirmed by the maintainer first
+
+## After v0.6
 
 | Item | Content |
 |---|---|
 | Parallel batch | library API, decided from the CLI measurements (#95) |
-| Ports | sidecar (HTTP / gRPC, OTLP export), JVM (UniFFI or WASM on Chicory), Python (PyO3), sandboxed WASM user ops |
-| Supply chain | artifact attestations at the first binary release |
+| Ports | gRPC for the sidecar, JVM (UniFFI or WASM on Chicory), Python (PyO3), sandboxed WASM user ops |
+| Input | CSV header row names as field paths, which needs state across records (#103) |
 
 ## Workflow
 
