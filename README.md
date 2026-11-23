@@ -109,10 +109,15 @@ When the body cannot be read to the end, for example when a record is not
 valid UTF-8, the responses before it are followed by a line such as
 `{"error":{"message":"not valid UTF-8","record":2}}`. Request size, record
 size, time per request and requests at once are limited, and `GET /healthz`
-and `GET /readyz` answer probes. A client that sends a large body should read
-the response while sending; otherwise the sidecar stops reading the body once
-the unread responses fill its buffers, and the request ends at the time
-limit.
+and `GET /readyz` answer probes.
+
+Each request holds at most `--max-buffer-bytes` (16 MiB by default) of
+records being processed and responses the client has not read, plus the
+batches being processed at that moment. Once it holds that much, the sidecar
+stops reading the body until the client reads more of the response. A client
+that reads the response only after sending the whole body is therefore served
+only while the responses fit in that limit; past it, the request ends at the
+time limit.
 
 Configuration examples for a JSON API response, a CSV export and an nginx
 access log are in `crates/moldette-config/tests/fixtures`. The

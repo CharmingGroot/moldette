@@ -7,19 +7,19 @@ use std::task::{Context, Poll};
 use http_body_util::BodyExt;
 use hyper::body::{Body, Bytes, Frame, Incoming};
 use serde_json::json;
-use tokio::sync::mpsc::{self, Receiver, Sender, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::{Instant, timeout_at};
 
-use crate::pool::{Batcher, Job, Message, RecordError};
+use crate::budget::Budget;
+use crate::pool::{Batch, Batcher, Job, Message, RecordError};
 use crate::state::State;
 
-/// Batches of one request queued for the response: enough to keep every
-/// worker busy while earlier output is written.
-const OUTPUT_BATCHES: usize = 4;
-
 /// The streamed body of a `POST /v1/process` response.
-pub(crate) struct Output(Receiver<Bytes>);
+pub(crate) struct Output {
+    receiver: UnboundedReceiver<Bytes>,
+    budget: Arc<Budget>,
+}
 
 impl Body for Output {
     type Data = Bytes;
@@ -29,10 +29,13 @@ impl Body for Output {
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Option<Result<Frame<Bytes>, Infallible>>> {
-        self.get_mut()
-            .0
-            .poll_recv(cx)
-            .map(|bytes| bytes.map(|bytes| Ok(Frame::data(bytes))))
+        let output = self.get_mut();
+        output.receiver.poll_recv(cx).map(|bytes| {
+            bytes.map(|bytes| {
+                output.budget.release(bytes.len());
+                Ok(Frame::data(bytes))
+            })
+        })
     }
 }
 
@@ -40,40 +43,74 @@ impl Body for Output {
 /// output. `request` holds this request's place among the requests allowed at
 /// once until processing ends.
 pub(crate) fn start(state: Arc<State>, body: Incoming, request: OwnedSemaphorePermit) -> Output {
-    let (sender, receiver) = mpsc::channel(OUTPUT_BATCHES);
+    let (sender, receiver) = mpsc::unbounded_channel();
+    let budget = Arc::new(Budget::new(state.limits.max_buffer_bytes));
+    let output = Output {
+        receiver,
+        budget: Arc::clone(&budget),
+    };
     tokio::spawn(async move {
-        run(state, body, sender).await;
+        run(state, body, Sink { sender, budget }).await;
         drop(request);
     });
-    Output(receiver)
+    output
 }
 
-async fn run(state: Arc<State>, body: Incoming, output: Sender<Bytes>) {
+/// Where the response of one request is written, holding each line in the
+/// request's budget until the connection takes it.
+struct Sink {
+    sender: UnboundedSender<Bytes>,
+    budget: Arc<Budget>,
+}
+
+impl Sink {
+    /// Sends output that is already held; false once the response is dropped.
+    fn send_held(&self, bytes: Vec<u8>) -> bool {
+        self.sender.send(Bytes::from(bytes)).is_ok()
+    }
+
+    fn send_error(&self, record: usize, message: &str) {
+        let mut line = json!({ "error": { "record": record, "message": message } }).to_string();
+        line.push('\n');
+        self.budget.hold(line.len());
+        self.send_held(line.into_bytes());
+    }
+}
+
+async fn run(state: Arc<State>, body: Incoming, sink: Sink) {
     let deadline = Instant::now() + state.limits.timeout;
     let (results, mut received) = mpsc::unbounded_channel();
-    let reader = tokio::spawn(read(Arc::clone(&state), body, results));
+    let reader = tokio::spawn(read(
+        Arc::clone(&state),
+        body,
+        Arc::clone(&sink.budget),
+        results,
+    ));
     let mut written = 0;
-    let finished = timeout_at(
-        deadline,
-        write_in_order(&mut received, &output, &mut written),
-    )
-    .await;
+    let finished = timeout_at(deadline, write_in_order(&mut received, &sink, &mut written)).await;
+    // The reader may be waiting for budget that a dropped response never frees.
+    reader.abort();
     if finished.is_err() {
-        reader.abort();
         let message = format!(
             "the request took longer than {} seconds",
             state.limits.timeout.as_secs()
         );
-        let _ = output.try_send(error_line(written + 1, &message));
+        sink.send_error(written + 1, &message);
     }
 }
 
-async fn read(state: Arc<State>, mut body: Incoming, results: UnboundedSender<Message>) {
+async fn read(
+    state: Arc<State>,
+    mut body: Incoming,
+    budget: Arc<Budget>,
+    results: UnboundedSender<Message>,
+) {
     let permits = Arc::new(Semaphore::new(state.threads.get() * 2));
     let mut framer = state.framer.clone();
     let mut batcher = Batcher::new();
     let mut received = 0;
     let error = loop {
+        budget.below_limit().await;
         let (framed, end) = match body.frame().await {
             None => (framer.finish(&mut |record| batcher.add(record)), true),
             Some(Err(err)) => {
@@ -100,7 +137,7 @@ async fn read(state: Arc<State>, mut body: Incoming, results: UnboundedSender<Me
         // A client may stream records slowly; what arrived is processed now.
         batcher.close();
         for batch in batcher.take_full() {
-            if !submit(&state, &permits, &results, batch).await {
+            if !submit(&state, &permits, &budget, &results, batch).await {
                 return;
             }
         }
@@ -114,7 +151,7 @@ async fn read(state: Arc<State>, mut body: Incoming, results: UnboundedSender<Me
     });
     batcher.close();
     for batch in batcher.take_full() {
-        if !submit(&state, &permits, &results, batch).await {
+        if !submit(&state, &permits, &budget, &results, batch).await {
             return;
         }
     }
@@ -127,15 +164,18 @@ async fn read(state: Arc<State>, mut body: Incoming, results: UnboundedSender<Me
 async fn submit(
     state: &State,
     permits: &Arc<Semaphore>,
+    budget: &Arc<Budget>,
     results: &UnboundedSender<Message>,
-    batch: crate::pool::Batch,
+    batch: Batch,
 ) -> bool {
     let Ok(permit) = Arc::clone(permits).acquire_owned().await else {
         return false;
     };
+    budget.hold(batch.len());
     state.pool.submit(Job {
         batch,
         permit,
+        budget: Arc::clone(budget),
         results: results.clone(),
     })
 }
@@ -144,7 +184,7 @@ async fn submit(
 /// input, if any. `written` counts the records written so far.
 async fn write_in_order(
     received: &mut UnboundedReceiver<Message>,
-    output: &Sender<Bytes>,
+    sink: &Sink,
     written: &mut usize,
 ) {
     let mut pending = BTreeMap::new();
@@ -158,13 +198,13 @@ async fn write_in_order(
             Message::End { batches, error } => end = Some((batches, error)),
         }
         while let Some(processed) = pending.remove(&next) {
-            if output.send(Bytes::from(processed.output)).await.is_err() {
+            if !sink.send_held(processed.output) {
                 return;
             }
             *written += processed.records;
             next += 1;
             if let Some(error) = processed.error {
-                let _ = output.send(error_line(error.record, &error.message)).await;
+                sink.send_error(error.record, &error.message);
                 return;
             }
         }
@@ -172,15 +212,9 @@ async fn write_in_order(
             && next == *batches
         {
             if let Some(error) = error.take() {
-                let _ = output.send(error_line(error.record, &error.message)).await;
+                sink.send_error(error.record, &error.message);
             }
             return;
         }
     }
-}
-
-fn error_line(record: usize, message: &str) -> Bytes {
-    let mut line = json!({ "error": { "record": record, "message": message } }).to_string();
-    line.push('\n');
-    Bytes::from(line)
 }

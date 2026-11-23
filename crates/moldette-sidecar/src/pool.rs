@@ -9,6 +9,8 @@ use moldette_spec::json::JsonResponse;
 use tokio::sync::OwnedSemaphorePermit;
 use tokio::sync::mpsc::UnboundedSender;
 
+use crate::budget::Budget;
+
 const BATCH_RECORDS: usize = 256;
 const BATCH_BYTES: usize = 1 << 20;
 
@@ -23,6 +25,7 @@ pub(crate) struct Batch {
 pub(crate) struct Job {
     pub(crate) batch: Batch,
     pub(crate) permit: OwnedSemaphorePermit,
+    pub(crate) budget: Arc<Budget>,
     pub(crate) results: UnboundedSender<Message>,
 }
 
@@ -81,12 +84,15 @@ fn work(pipeline: &Pipeline, receiver: &Mutex<Receiver<Job>>) {
         let Ok(Job {
             batch,
             permit,
+            budget,
             results,
         }) = job
         else {
             return;
         };
         let (output, error) = process(pipeline, &batch);
+        budget.hold(output.len());
+        budget.release(batch.len());
         let _ = results.send(Message::Processed(Processed {
             sequence: batch.sequence,
             output,
@@ -115,6 +121,13 @@ fn process(pipeline: &Pipeline, batch: &Batch) -> (Vec<u8>, Option<RecordError>)
         output.push(b'\n');
     }
     (output, None)
+}
+
+impl Batch {
+    /// The bytes of its records.
+    pub(crate) fn len(&self) -> usize {
+        self.text.len()
+    }
 }
 
 /// Collects framed records of one request into batches.

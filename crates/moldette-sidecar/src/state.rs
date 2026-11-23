@@ -10,6 +10,7 @@ use crate::pool::Pool;
 
 pub(crate) struct Limits {
     pub(crate) max_body_bytes: u64,
+    pub(crate) max_buffer_bytes: usize,
     pub(crate) timeout: Duration,
     pub(crate) max_requests: usize,
 }

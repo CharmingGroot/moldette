@@ -1,6 +1,7 @@
 //! `moldette-sidecar`, which runs one configuration over records sent to it
 //! over HTTP (#103).
 
+mod budget;
 mod load;
 mod pool;
 mod process;
@@ -51,6 +52,10 @@ Options:
                           joins it
   --max-body-bytes <n>    Largest request body [default: 67108864]
   --max-record-bytes <n>  Largest record [default: 1048576]
+  --max-buffer-bytes <n>  Bytes one request holds: records being processed
+                          and responses the client has not read; the body is
+                          not read further until it holds less [default:
+                          16777216]
   --timeout <seconds>     Time for one request, from reading its body to
                           writing the last response [default: 30]
   --max-requests <n>      Requests processed at once; more are answered with
@@ -64,6 +69,7 @@ const USAGE_ERROR: u8 = 2;
 const DEFAULT_LISTEN: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 8095));
 const DEFAULT_MAX_BODY_BYTES: u64 = 64 << 20;
 const DEFAULT_MAX_RECORD_BYTES: usize = 1 << 20;
+const DEFAULT_MAX_BUFFER_BYTES: NonZeroUsize = NonZeroUsize::new(16 << 20).unwrap();
 const DEFAULT_TIMEOUT_SECONDS: NonZeroU64 = NonZeroU64::new(30).unwrap();
 const DEFAULT_MAX_REQUESTS: NonZeroUsize = NonZeroUsize::new(16).unwrap();
 const IO_THREADS: usize = 2;
@@ -150,6 +156,7 @@ fn settings(args: &mut Vec<OsString>) -> Result<Settings, ExitCode> {
     let record_start = option("--record-start")?;
     let max_body_bytes = option("--max-body-bytes")?;
     let max_record_bytes = option("--max-record-bytes")?;
+    let max_buffer_bytes = option("--max-buffer-bytes")?;
     let timeout = option("--timeout")?;
     let max_requests = option("--max-requests")?;
     let available = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
@@ -160,6 +167,7 @@ fn settings(args: &mut Vec<OsString>) -> Result<Settings, ExitCode> {
             .max_record_len(parse(max_record_bytes, DEFAULT_MAX_RECORD_BYTES)?),
         limits: Limits {
             max_body_bytes: parse(max_body_bytes, DEFAULT_MAX_BODY_BYTES)?,
+            max_buffer_bytes: parse(max_buffer_bytes, DEFAULT_MAX_BUFFER_BYTES)?.get(),
             timeout: Duration::from_secs(parse(timeout, DEFAULT_TIMEOUT_SECONDS)?.get()),
             max_requests: parse(max_requests, DEFAULT_MAX_REQUESTS)?.get(),
         },

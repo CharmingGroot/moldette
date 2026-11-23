@@ -79,6 +79,25 @@ impl Sidecar {
         self.send(&request)
     }
 
+    /// Posts `body` from another thread while reading the reply.
+    fn post_reading_while_sending(&self, body: &[u8]) -> Reply {
+        let mut stream = self.connect();
+        let mut writer = stream.try_clone().expect("stream clone");
+        let mut request = format!(
+            "POST /v1/process HTTP/1.1\r\nHost: sidecar\r\nConnection: close\r\nContent-Length: {}\r\n\r\n",
+            body.len()
+        )
+        .into_bytes();
+        request.extend_from_slice(body);
+        let sending = thread::spawn(move || writer.write_all(&request));
+        let reply = Reply::read(&mut stream);
+        sending
+            .join()
+            .expect("the sending thread ends")
+            .expect("request is written");
+        reply
+    }
+
     fn post_chunked(&self, chunks: &[&[u8]]) -> Reply {
         let mut request = b"POST /v1/process HTTP/1.1\r\nHost: sidecar\r\nConnection: close\r\nTransfer-Encoding: chunked\r\n\r\n".to_vec();
         for chunk in chunks {
@@ -369,6 +388,7 @@ fn fails_on_bad_arguments_and_configuration_before_listening() {
         &["--listen", "localhost", CONFIG],
         &["--records", "multiline", CONFIG],
         &["--max-requests", "0", CONFIG],
+        &["--max-buffer-bytes", "0", CONFIG],
         &[CONFIG, CONFIG],
     ] {
         let output = run(args);
@@ -393,8 +413,38 @@ fn the_last_record_needs_no_line_end() {
 }
 
 #[test]
+fn a_client_reading_while_sending_is_served_with_a_small_buffer() {
+    let sidecar = Sidecar::start(&["--max-buffer-bytes", "1"]);
+    let input = orders().repeat(4000);
+    let reply = sidecar.post_reading_while_sending(input.as_bytes());
+    assert_eq!(reply.status, 200);
+    assert_eq!(reply.text(), expected(&input));
+}
+
+#[test]
+fn a_client_reading_after_sending_is_served_while_the_responses_fit_the_buffer() {
+    let sidecar = Sidecar::start(&["--max-buffer-bytes", "268435456"]);
+    let input = orders().repeat(8000);
+    let mut stream = sidecar.connect();
+    stream
+        .set_write_timeout(Some(Duration::from_secs(10)))
+        .expect("write timeout");
+    let reply = {
+        let mut request = format!(
+            "POST /v1/process HTTP/1.1\r\nHost: sidecar\r\nConnection: close\r\nContent-Length: {}\r\n\r\n",
+            input.len()
+        )
+        .into_bytes();
+        request.extend_from_slice(input.as_bytes());
+        stream.write_all(&request).expect("the whole body is read");
+        Reply::read(&mut stream)
+    };
+    assert_eq!(reply.text(), expected(&input));
+}
+
+#[test]
 fn stops_reading_the_body_while_the_response_is_not_read() {
-    let sidecar = Sidecar::start(&["--threads", "1"]);
+    let sidecar = Sidecar::start(&["--threads", "1", "--max-buffer-bytes", "1048576"]);
     let total = 48 << 20;
     let mut stream = sidecar.connect();
     stream
