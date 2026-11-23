@@ -19,3 +19,6 @@ serde = "1.0.229"
 serde_json = "1.0.154"
 sha2 = { version = "0.11.1", default-features = false }
 yaml-rust2 = { version = "0.13.0", default-features = false }
+
+[dev-dependencies]
+moldette-spec = { workspace = true }
