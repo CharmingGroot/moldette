@@ -827,6 +827,7 @@ name = "moldette-cli"
 version = "0.5.0"
 dependencies = [
  "flate2",
+ "mimalloc",
  "moldette",
  "moldette-spec",
  "serde_json",

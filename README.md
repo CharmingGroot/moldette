@@ -140,6 +140,12 @@ For the command and the sidecar:
     cargo install moldette-cli
     cargo install moldette-sidecar
 
+From 0.6.0, each GitHub Release also carries the `moldette` command built for
+Linux (x86_64 and aarch64, statically linked), macOS (x86_64 and aarch64) and
+Windows (x86_64), with a `SHA256SUMS` file and build provenance attestations:
+
+    gh attestation verify moldette-cli-0.6.0-x86_64-unknown-linux-musl.tar.gz -R CharmingGroot/moldette
+
 The sidecar image `ghcr.io/charminggroot/moldette-sidecar` runs on
 `linux/amd64` and `linux/arm64`. It holds only the static binary, runs as user
 65532 and needs no writable file system. Images built from release tags carry

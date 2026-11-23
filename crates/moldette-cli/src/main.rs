@@ -16,6 +16,10 @@ use std::thread;
 use moldette::framing::Framer;
 use run::Mode;
 
+// The static Linux binaries link musl, whose allocator serializes threads.
+#[global_allocator]
+static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 const USAGE: &str = "\
 Usage: moldette check <config>
        moldette run [options] <config> [input]
