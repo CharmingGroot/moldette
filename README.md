@@ -76,11 +76,22 @@ The same configuration can be checked and run from the command line:
     moldette explain order.yaml orders.ndjson
 
 `check` reports what the configuration gets wrong and prints its lineage as
-JSON. `run` reads one record per line from a file or standard input and prints
-one JSON response per line; `explain` adds how each field was filled. Both
-process records on every available core, or on `--threads <n>`, and keep the
-input order. Only built-in formats and operations are available from the
-command line.
+JSON. `run` reads records from a file or standard input and prints one JSON
+response per line; `explain` adds how each field was filled. Both process
+records on every available core, or on `--threads <n>`, and keep the input
+order. Only built-in formats and operations are available from the command
+line.
+
+Records are one per line by default. `--records json` reads one record per
+JSON value, or per element of a top-level array, and `--records multiline
+--record-start <regex>` joins each line that does not match the pattern to the
+record before it. Input files ending in `.gz` are decompressed.
+
+    moldette run --records json order.yaml orders.json
+    moldette run --records multiline --record-start '^\d{4}-' app.yaml app.log.gz
+
+The `framing` feature of the `moldette` crate provides the same record
+splitting to programs, without I/O.
 
 Configuration examples for a JSON API response, a CSV export and an nginx
 access log are in `crates/moldette-config/tests/fixtures`. The

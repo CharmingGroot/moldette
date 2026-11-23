@@ -50,7 +50,7 @@ fn stops_at_a_line_that_is_not_utf8_after_the_lines_before_it() {
     let output = moldette_with_input(&["run", "--threads", "4", &config], &input);
     assert_eq!(output.status.code(), Some(1));
     assert_eq!(responses(&output).len(), 2250);
-    assert!(stderr(&output).starts_with("error: standard input: line 2251: "));
+    assert!(stderr(&output).starts_with("error: standard input: record 2251: "));
 }
 
 #[test]

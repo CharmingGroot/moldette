@@ -1,5 +1,8 @@
 use std::fs;
-use std::process::Output;
+use std::io::{BufRead, BufReader, Write};
+use std::process::{Command, Output, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use super::{CONFIG_FIXTURES, DATA, FIXTURES, moldette, moldette_with_input, stderr};
 use serde_json::{Value, json};
@@ -102,7 +105,7 @@ fn stops_at_a_line_that_is_not_utf8() {
     );
     assert_eq!(output.status.code(), Some(1));
     assert_eq!(responses(&output).len(), 1);
-    assert!(stderr(&output).starts_with("error: standard input: line 2: "));
+    assert!(stderr(&output).starts_with("error: standard input: record 2: "));
 }
 
 #[test]
@@ -112,4 +115,39 @@ fn fails_on_a_missing_input_file() {
     let output = moldette(&["run", &config, &input]);
     assert_eq!(output.status.code(), Some(1));
     assert!(stderr(&output).starts_with(&format!("error: {input}: ")));
+}
+
+#[test]
+fn stops_reading_once_standard_output_closes() {
+    let config = format!("{CONFIG_FIXTURES}/order_api.yaml");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_moldette"))
+        .args(["run", "--threads", "2", &config])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("moldette starts");
+    let mut stdin = child.stdin.take().expect("piped standard input");
+    let writer = thread::spawn(move || {
+        let line = b"{\"id\":\"A-1\"}\n".repeat(1024);
+        while stdin.write_all(&line).is_ok() {}
+    });
+    let mut first = String::new();
+    BufReader::new(child.stdout.take().expect("piped standard output"))
+        .read_line(&mut first)
+        .expect("first response");
+    assert!(first.starts_with("{\"status\""));
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("moldette status") {
+            break status;
+        }
+        if Instant::now() > deadline {
+            child.kill().expect("moldette stops");
+            panic!("moldette kept reading after standard output closed");
+        }
+        thread::sleep(Duration::from_millis(20));
+    };
+    assert!(status.success());
+    writer.join().expect("input writer finishes");
 }
