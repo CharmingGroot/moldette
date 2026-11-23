@@ -18,6 +18,12 @@ moldette is at version 0.x.
 
 ## Unreleased
 
+## 0.6.0 (2026-11-23)
+
+`moldette-spec` and `moldette-sidecar` are new on crates.io. `moldette-spec`
+0.5.0 was published ahead of this release so that 0.6.0 could be published
+through trusted publishing; its code is that of 0.6.0.
+
 ### Added
 
 - `moldette`: the `framing` feature splits text into records without I/O:
