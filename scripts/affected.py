@@ -6,8 +6,8 @@ and a crate that depends on it through another crate is compiled (check).
 A change to core, to a shared kernel module or to a crate root counts as a
 change to every module of that crate, and core runs every crate that uses it
 in full. A `Cargo.lock` change runs in full the crates whose resolved
-dependency tree changed. `moldette-cli` and a crate under `examples/` or
-`benches/` skip the wasm32 build and, unless they changed themselves, are only
+dependency tree changed. `moldette-cli`, `moldette-sidecar` and a crate under
+`examples/` or `benches/` skip the wasm32 build and, unless they changed themselves, are only
 compiled (#84); a benchmark crate with allocation tests runs those instead
 (#64).
 
@@ -45,7 +45,9 @@ LOWERING_CRATE = "moldette-config"
 FACADE_CRATE = "moldette"
 FORMAT_CRATE = "moldette-parser"
 TEST_TRACING_CRATE = "moldette-test-tracing"
-HOST_ONLY_DIRS = ("examples/", "benches/", "crates/moldette-cli/")
+HOST_ONLY_DIRS = (
+    "examples/", "benches/", "crates/moldette-cli/", "crates/moldette-sidecar/",
+)
 LOWERING_TESTS = "--test lowering"
 E2E_TESTS = "--test e2e"
 ALLOCATION_TESTS = "--test allocations"
