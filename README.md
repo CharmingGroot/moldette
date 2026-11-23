@@ -48,6 +48,8 @@ produced by another system.
 - `moldette-core`: the types the layers exchange.
 - `moldette-cli`: the `moldette` command, which checks a configuration file
   and runs it over records.
+- `moldette-sidecar`: an HTTP server that runs one configuration over records
+  streamed to it, for an application in the same pod.
 - `moldette-spec`: output formats of responses. The `json` feature writes a
   response as the command prints it, through `serde`.
 
@@ -95,6 +97,23 @@ record before it. Input files ending in `.gz` are decompressed.
 The `framing` feature of the `moldette` crate provides the same record
 splitting to programs, without I/O.
 
+`moldette-sidecar` runs one configuration for an application in the same pod
+or host. It listens on `127.0.0.1:8095` by default, takes the record options
+above, and streams one response per line, in input order, as the request body
+arrives:
+
+    moldette-sidecar --records json order.yaml
+    curl --data-binary @orders.json http://127.0.0.1:8095/v1/process
+
+When the body cannot be read to the end, for example when a record is not
+valid UTF-8, the responses before it are followed by a line such as
+`{"error":{"message":"not valid UTF-8","record":2}}`. Request size, record
+size, time per request and requests at once are limited, and `GET /healthz`
+and `GET /readyz` answer probes. A client that sends a large body should read
+the response while sending; otherwise the sidecar stops reading the body once
+the unread responses fill its buffers, and the request ends at the time
+limit.
+
 Configuration examples for a JSON API response, a CSV export and an nginx
 access log are in `crates/moldette-config/tests/fixtures`. The
 `examples/otlp` program sends the spans of a pipeline to an OpenTelemetry
@@ -104,9 +123,10 @@ collector.
 
     cargo add moldette
 
-For the command:
+For the command and the sidecar:
 
     cargo install moldette-cli
+    cargo install moldette-sidecar
 
 The default `config` feature turns on every layer. To use one layer without
 configuration files, depend on its crate, such as `moldette-parser`, or turn
