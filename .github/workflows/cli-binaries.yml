@@ -80,7 +80,7 @@ jobs:
           binary="target/$TARGET/release/moldette"
           "$binary" --version
           "$binary" run examples/configs/access-log/config.yaml examples/configs/access-log/input.log \
-            | tr -d '\r' | diff - examples/configs/access-log/expected.ndjson
+            | diff --strip-trailing-cr - examples/configs/access-log/expected.ndjson
       - name: Package
         run: |
           version="${GITHUB_REF_NAME#v}"
