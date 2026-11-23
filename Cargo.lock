@@ -840,6 +840,7 @@ dependencies = [
  "moldette-mapper",
  "moldette-parser",
  "moldette-resp",
+ "moldette-spec",
  "serde",
  "serde_json",
  "sha2",

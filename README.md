@@ -26,11 +26,12 @@ A record passes through three layers:
   one status: `Ok`, `Malformed` (the parser could not read it),
   `MissingRequired` or `Emptied` (strict mode).
 
-A configuration file in YAML or JSON describes all three layers. It is checked
-once when it is built: unknown keys, references between layers and rule errors
-are reported before any record is processed. The built specs are immutable and
-can be shared across threads. The configuration also yields lineage: which
-input field each output field comes from.
+A configuration file in YAML or JSON describes all three layers; every key is
+described in `docs/CONFIGURATION.md`. It is checked once when it is built:
+unknown keys, references between layers and rule errors are reported before
+any record is processed. The built specs are immutable and can be shared
+across threads. The configuration also yields lineage: which input field each
+output field comes from.
 
 Custom parsers and operations are registered as Rust types; the configuration
 has no expression language.
