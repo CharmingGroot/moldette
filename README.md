@@ -156,9 +156,11 @@ off the default features and select the layer feature.
 
 ## Status
 
-moldette is at version 0.x and requires Rust 1.88 or later. The public API may
-change between minor versions until the core contracts are stable. The scope,
-layers and milestones are described in `docs/PLAN.md`.
+moldette is at version 0.x and requires Rust 1.88 or later. A minor release
+may change the public API, the configuration format and the output of the
+command and the sidecar; a patch release does not. Changes are listed in
+`CHANGELOG.md`, and the scope, layers and milestones are described in
+`docs/PLAN.md`.
 
 ## Contributing
 
