@@ -137,6 +137,10 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(scoped("docs/CONFIGURATION.md"), [entry(CONFIG, "edge", "--test docs")])
         self.assertIn(entry(CONFIG, "full"), scoped("docs/CONFIGURATION.md", "crates/moldette-config/src/model.rs"))
 
+    def test_configuration_examples_run_their_cli_tests(self):
+        self.assertEqual(scoped("examples/configs/syslog/input.log"),
+                         [entry(CLI, "edge", "--test cli -- examples::")])
+
     def test_parser_shared_kernel_counts_as_change_to_every_parser_module(self):
         self.assertEqual(scoped("crates/moldette-parser/src/text.rs"), [
             entry(FACADE, "edge", "--test e2e"),

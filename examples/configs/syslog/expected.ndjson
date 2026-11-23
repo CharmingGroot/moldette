@@ -1,0 +1,4 @@
+{"status":"ok","fields":{"time":"2026-11-18T09:30:00+09:00","priority":30,"host":"web-1","app":"orders","pid":4721,"message":"order A-1 saved in 12 ms"},"emptied":[]}
+{"status":"ok","fields":{"time":"2026-11-18T09:30:04+09:00","priority":27,"host":"web-1","app":"orders","pid":4721,"message":"payment provider timed out after 3000 ms"},"emptied":[]}
+{"status":"ok","fields":{"time":"2026-11-08T23:59:59+09:00","priority":13,"host":"db-2","app":"backup","message":"nightly dump finished"},"emptied":[]}
+{"status":"malformed","reason":"record does not match the pattern"}
