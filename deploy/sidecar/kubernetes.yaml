@@ -1,0 +1,116 @@
+# moldette-sidecar next to an application in one pod.
+#
+# The sidecar runs as a native sidecar container (an init container with
+# `restartPolicy: Always`, Kubernetes 1.29 or later), so the application
+# starts once the startup probe passes and the sidecar stops after it. Records
+# are sent to 127.0.0.1:8095, which is not reachable from outside the pod;
+# the probes use the separate health address.
+#
+#   kubectl apply -f deploy/sidecar/kubernetes.yaml
+#   kubectl logs orders -c app
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: orders-moldette
+data:
+  config.yaml: |
+    schemas:
+      - name: order
+        version: 1
+        fields:
+          - {name: id, type: string, required: true}
+          - {name: status, type: string}
+          - {name: total, type: float, required: true}
+          - {name: created_at, type: timestamp, required: true}
+    parser:
+      format: json
+      fields:
+        id: /id
+        status: /status
+        total: /total
+        created_at: /created_at
+    mapper:
+      schema: {name: order, version: 1}
+    resp:
+      schema: {name: order, version: 1}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: orders
+spec:
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    seccompProfile:
+      type: RuntimeDefault
+  initContainers:
+    - name: moldette-sidecar
+      image: ghcr.io/charminggroot/moldette-sidecar:0.6.0
+      restartPolicy: Always
+      args:
+        - --health-listen
+        - 0.0.0.0:8096
+        - /etc/moldette/config.yaml
+      ports:
+        - name: health
+          containerPort: 8096
+      startupProbe:
+        httpGet:
+          path: /readyz
+          port: health
+        periodSeconds: 1
+        failureThreshold: 30
+      livenessProbe:
+        httpGet:
+          path: /healthz
+          port: health
+        periodSeconds: 10
+      # With the default limits, 16 requests at once whose responses are not
+      # read hold about 450 MiB; see the sidecar section of the README.
+      resources:
+        requests:
+          cpu: 100m
+          memory: 64Mi
+        limits:
+          cpu: "1"
+          memory: 512Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: [ALL]
+      volumeMounts:
+        - name: config
+          mountPath: /etc/moldette
+          readOnly: true
+  containers:
+    - name: app
+      image: curlimages/curl:8.23.0
+      command:
+        - sh
+        - -c
+        - |
+          while true; do
+            printf '%s\n' \
+              '{"id":"A-1","status":"paid","total":25.5,"created_at":"2026-11-18T09:30:00Z"}' \
+              '{"id":"A-2","total":"n/a","created_at":"2026-11-18T10:00:00Z"}' |
+              curl -sS --data-binary @- http://127.0.0.1:8095/v1/process
+            sleep 10
+          done
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+        limits:
+          memory: 32Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: [ALL]
+  volumes:
+    - name: config
+      configMap:
+        name: orders-moldette

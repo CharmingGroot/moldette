@@ -24,6 +24,10 @@ use moldette::framing::Framer;
 
 use state::{Limits, State};
 
+// The static container image links musl, whose allocator serializes threads.
+#[global_allocator]
+static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 const USAGE: &str = "\
 Usage: moldette-sidecar [options] <config>
 
@@ -41,6 +45,10 @@ Endpoints:
 Options:
   --listen <address>      Address and port to listen on [default:
                           127.0.0.1:8095]
+  --health-listen <address>
+                          A second address that answers only GET /healthz
+                          and GET /readyz, for probes that cannot reach the
+                          loopback address
   --threads <n>           Threads that parse and map records [default: the
                           number of available cores]
   --records <how>         How a request body splits into records: `lines`,
@@ -76,6 +84,7 @@ const IO_THREADS: usize = 2;
 
 struct Settings {
     listen: SocketAddr,
+    health_listen: Option<SocketAddr>,
     threads: NonZeroUsize,
     framer: Framer,
     limits: Limits,
@@ -131,6 +140,16 @@ fn main() -> ExitCode {
                 return ExitCode::FAILURE;
             }
         };
+        let health = match settings.health_listen {
+            Some(address) => match tokio::net::TcpListener::bind(address).await {
+                Ok(listener) => Some(listener),
+                Err(err) => {
+                    eprintln!("error: {address}: {err}");
+                    return ExitCode::FAILURE;
+                }
+            },
+            None => None,
+        };
         let address = listener.local_addr().unwrap_or(settings.listen);
         let state = Arc::new(State::new(
             pipeline,
@@ -142,7 +161,10 @@ fn main() -> ExitCode {
             "moldette-sidecar {} listening on {address}",
             env!("CARGO_PKG_VERSION")
         );
-        server::serve(listener, state).await;
+        if let Some(Ok(address)) = health.as_ref().map(tokio::net::TcpListener::local_addr) {
+            eprintln!("moldette-sidecar health checks on {address}");
+        }
+        server::serve(listener, health, state).await;
         eprintln!("moldette-sidecar stopped");
         ExitCode::SUCCESS
     })
@@ -151,6 +173,7 @@ fn main() -> ExitCode {
 fn settings(args: &mut Vec<OsString>) -> Result<Settings, ExitCode> {
     let mut option = |name| take_option(args, name).map_err(|()| usage_error());
     let listen = option("--listen")?;
+    let health_listen = option("--health-listen")?;
     let threads = option("--threads")?;
     let records = option("--records")?;
     let record_start = option("--record-start")?;
@@ -162,6 +185,9 @@ fn settings(args: &mut Vec<OsString>) -> Result<Settings, ExitCode> {
     let available = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
     Ok(Settings {
         listen: parse(listen, DEFAULT_LISTEN)?,
+        health_listen: health_listen
+            .map(|address| address.parse().map_err(|_| usage_error()))
+            .transpose()?,
         threads: parse(threads, available)?,
         framer: framer(records, record_start)?
             .max_record_len(parse(max_record_bytes, DEFAULT_MAX_RECORD_BYTES)?),

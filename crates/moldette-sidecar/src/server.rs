@@ -1,4 +1,6 @@
 use std::convert::Infallible;
+use std::io;
+use std::net::SocketAddr;
 use std::pin::pin;
 use std::sync::Arc;
 use std::time::Duration;
@@ -13,7 +15,7 @@ use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::{TokioIo, TokioTimer};
 use hyper_util::server::graceful::GracefulShutdown;
 use serde_json::json;
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpStream};
 use tokio::time::sleep;
 
 use crate::process;
@@ -25,39 +27,55 @@ const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 
 type ResponseBody = BoxBody<Bytes, Infallible>;
 
+/// The endpoints a listener serves.
+#[derive(Clone, Copy)]
+enum Endpoints {
+    All,
+    Health,
+}
+
 /// Serves connections until SIGTERM or Ctrl-C, then waits for the requests in
-/// progress for up to the request time limit.
-pub(crate) async fn serve(listener: TcpListener, state: Arc<State>) {
+/// progress for up to the request time limit. `health`, when given, answers
+/// only the probe endpoints.
+pub(crate) async fn serve(listener: TcpListener, health: Option<TcpListener>, state: Arc<State>) {
     let graceful = GracefulShutdown::new();
     let mut shutdown = pin!(shutdown_signal());
     loop {
-        tokio::select! {
-            accepted = listener.accept() => {
-                let Ok((stream, _)) = accepted else {
-                    sleep(ACCEPT_RETRY).await;
-                    continue;
-                };
-                let state = Arc::clone(&state);
-                let service = service_fn(move |request| {
-                    let state = Arc::clone(&state);
-                    async move { Ok::<_, Infallible>(route(state, request)) }
-                });
-                let connection = http1::Builder::new()
-                    .timer(TokioTimer::new())
-                    .header_read_timeout(HEADER_TIMEOUT)
-                    .serve_connection(TokioIo::new(stream), service);
-                let connection = graceful.watch(connection);
-                tokio::spawn(async move {
-                    let _ = connection.await;
-                });
-            }
+        let (accepted, endpoints) = tokio::select! {
+            accepted = listener.accept() => (accepted, Endpoints::All),
+            accepted = accept(health.as_ref()) => (accepted, Endpoints::Health),
             () = &mut shutdown => break,
-        }
+        };
+        let Ok((stream, _)) = accepted else {
+            sleep(ACCEPT_RETRY).await;
+            continue;
+        };
+        let state = Arc::clone(&state);
+        let service = service_fn(move |request| {
+            let state = Arc::clone(&state);
+            async move { Ok::<_, Infallible>(route(state, request, endpoints)) }
+        });
+        let connection = http1::Builder::new()
+            .timer(TokioTimer::new())
+            .header_read_timeout(HEADER_TIMEOUT)
+            .serve_connection(TokioIo::new(stream), service);
+        let connection = graceful.watch(connection);
+        tokio::spawn(async move {
+            let _ = connection.await;
+        });
     }
     drop(listener);
+    drop(health);
     tokio::select! {
         () = graceful.shutdown() => {}
         () = sleep(state.limits.timeout + SHUTDOWN_GRACE) => {}
+    }
+}
+
+async fn accept(listener: Option<&TcpListener>) -> io::Result<(TcpStream, SocketAddr)> {
+    match listener {
+        Some(listener) => listener.accept().await,
+        None => std::future::pending().await,
     }
 }
 
@@ -76,14 +94,18 @@ async fn shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
 }
 
-fn route(state: Arc<State>, request: Request<Incoming>) -> Response<ResponseBody> {
+fn route(
+    state: Arc<State>,
+    request: Request<Incoming>,
+    endpoints: Endpoints,
+) -> Response<ResponseBody> {
     let method = request.method();
-    match request.uri().path() {
-        "/healthz" if method == Method::GET => text(StatusCode::OK, "ok\n"),
-        "/readyz" if method == Method::GET => text(StatusCode::OK, "ready\n"),
-        "/v1/process" if method == Method::POST => process(state, request),
-        "/healthz" | "/readyz" => not_allowed("GET"),
-        "/v1/process" => not_allowed("POST"),
+    match (request.uri().path(), endpoints) {
+        ("/healthz", _) if method == Method::GET => text(StatusCode::OK, "ok\n"),
+        ("/readyz", _) if method == Method::GET => text(StatusCode::OK, "ready\n"),
+        ("/healthz" | "/readyz", _) => not_allowed("GET"),
+        ("/v1/process", Endpoints::All) if method == Method::POST => process(state, request),
+        ("/v1/process", Endpoints::All) => not_allowed("POST"),
         _ => error(StatusCode::NOT_FOUND, "no such endpoint"),
     }
 }
