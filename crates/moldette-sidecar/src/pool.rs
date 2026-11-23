@@ -120,6 +120,8 @@ fn process(pipeline: &Pipeline, batch: &Batch) -> (Vec<u8>, Option<RecordError>)
         }
         output.push(b'\n');
     }
+    // The budget counts lengths, and the output waits for the client.
+    output.shrink_to_fit();
     (output, None)
 }
 
