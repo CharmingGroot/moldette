@@ -7,6 +7,9 @@
 //! `parser`, `mapper` and `resp` features. The contract types of
 //! `moldette-core` are re-exported at the root.
 //!
+//! The `framing` feature adds [`framing`], which splits an input stream
+//! into raw records before the parser (#103).
+//!
 //! The `tracing` feature turns on the `tracing` feature of each layer
 //! selected. The pipeline emits no signals of its own: in a batch, the parser
 //! and mapper spans of each record are children of the
@@ -43,6 +46,8 @@
 //! # fn main() {}
 //! ```
 
+#[cfg(feature = "framing")]
+pub mod framing;
 #[cfg(all(feature = "parser", feature = "mapper", feature = "resp"))]
 mod pipeline;
 

@@ -51,7 +51,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [json, delimited, regex, kv, bodies, pipeline]
+        target: [json, delimited, regex, kv, bodies, pipeline, framing]
     env:
       TARGET: ${{ matrix.target }}
       RUN_SECONDS: ${{ inputs.seconds || 300 }}

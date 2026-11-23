@@ -691,6 +691,7 @@ dependencies = [
  "moldette-parser",
  "moldette-resp",
  "moldette-test-tracing",
+ "regex",
  "tracing",
 ]
 

@@ -10,7 +10,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4.13"
-moldette = { path = "../crates/moldette" }
+moldette = { path = "../crates/moldette", features = ["framing"] }
 
 # Built by cargo-fuzz on nightly, outside the main workspace; see #84.
 [workspace]
@@ -54,6 +54,13 @@ bench = false
 [[bin]]
 name = "pipeline"
 path = "fuzz_targets/pipeline.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "framing"
+path = "fuzz_targets/framing.rs"
 test = false
 doc = false
 bench = false
