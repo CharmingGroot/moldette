@@ -49,18 +49,23 @@ impl Sidecar {
         }
     }
 
+    /// Reads the address from the next line of standard error that holds
+    /// `label`.
+    fn next_address(&mut self, label: &str) -> String {
+        let mut line = String::new();
+        self.stderr.read_line(&mut line).expect("address line");
+        line.trim_end()
+            .rsplit_once(label)
+            .map(|(_, address)| address.to_owned())
+            .unwrap_or_else(|| panic!("no {label:?} in {line:?}"))
+    }
+
     fn connect(&self) -> TcpStream {
-        let stream = TcpStream::connect(&self.address).expect("connected");
-        stream
-            .set_read_timeout(Some(Duration::from_secs(20)))
-            .expect("read timeout");
-        stream
+        connect(&self.address)
     }
 
     fn send(&self, request: &[u8]) -> Reply {
-        let mut stream = self.connect();
-        stream.write_all(request).expect("request is written");
-        Reply::read(&mut stream)
+        send(&self.address, request)
     }
 
     fn get(&self, path: &str) -> Reply {
@@ -128,6 +133,20 @@ impl Sidecar {
             thread::sleep(Duration::from_millis(20));
         }
     }
+}
+
+fn connect(address: &str) -> TcpStream {
+    let stream = TcpStream::connect(address).expect("connected");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(20)))
+        .expect("read timeout");
+    stream
+}
+
+fn send(address: &str, request: &[u8]) -> Reply {
+    let mut stream = connect(address);
+    stream.write_all(request).expect("request is written");
+    Reply::read(&mut stream)
 }
 
 impl Drop for Sidecar {
@@ -337,6 +356,26 @@ fn requests_over_the_limit_at_once_get_503() {
 }
 
 #[test]
+fn the_health_address_answers_only_probes() {
+    let mut sidecar = Sidecar::start(&["--health-listen", "127.0.0.1:0"]);
+    let health = sidecar.next_address("health checks on ");
+    let get = |path: &str| {
+        send(
+            &health,
+            format!("GET {path} HTTP/1.1\r\nHost: sidecar\r\nConnection: close\r\n\r\n").as_bytes(),
+        )
+    };
+    assert_eq!(get("/healthz").status, 200);
+    assert_eq!(get("/readyz").text(), "ready\n");
+    let process = send(
+        &health,
+        b"POST /v1/process HTTP/1.1\r\nHost: sidecar\r\nConnection: close\r\nContent-Length: 2\r\n\r\n{}",
+    );
+    assert_eq!(process.status, 404);
+    assert_eq!(sidecar.post(b"{}").status, 200);
+}
+
+#[test]
 fn unknown_paths_and_methods_are_refused() {
     let sidecar = Sidecar::start(&[]);
     assert_eq!(sidecar.get("/v1/explain").status, 404);
@@ -389,6 +428,7 @@ fn fails_on_bad_arguments_and_configuration_before_listening() {
         &["--records", "multiline", CONFIG],
         &["--max-requests", "0", CONFIG],
         &["--max-buffer-bytes", "0", CONFIG],
+        &["--health-listen", "localhost", CONFIG],
         &[CONFIG, CONFIG],
     ] {
         let output = run(args);

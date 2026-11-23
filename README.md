@@ -117,7 +117,13 @@ batches being processed at that moment. Once it holds that much, the sidecar
 stops reading the body until the client reads more of the response. A client
 that reads the response only after sending the whole body is therefore served
 only while the responses fit in that limit; past it, the request ends at the
-time limit.
+time limit. Such a request holds about the limit plus 7 MiB in the process and
+up to about 7 MiB more in kernel socket buffers, so with the defaults 16 of
+them hold about 450 MiB.
+
+Probes that cannot reach the loopback address, such as those of the kubelet,
+use `--health-listen <address>`, which answers only `GET /healthz` and
+`GET /readyz`.
 
 Configuration examples for a JSON API response, a CSV export and an nginx
 access log are in `crates/moldette-config/tests/fixtures`. The
@@ -132,6 +138,16 @@ For the command and the sidecar:
 
     cargo install moldette-cli
     cargo install moldette-sidecar
+
+The sidecar image `ghcr.io/charminggroot/moldette-sidecar` runs on
+`linux/amd64` and `linux/arm64`. It holds only the static binary, runs as user
+65532 and needs no writable file system. Images built from release tags carry
+a build provenance attestation:
+
+    gh attestation verify oci://ghcr.io/charminggroot/moldette-sidecar:0.6.0 -R CharmingGroot/moldette
+
+`deploy/sidecar/kubernetes.yaml` runs the sidecar next to an application in a
+pod with a restricted security context.
 
 The default `config` feature turns on every layer. To use one layer without
 configuration files, depend on its crate, such as `moldette-parser`, or turn
