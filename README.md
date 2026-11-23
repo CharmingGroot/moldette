@@ -48,6 +48,8 @@ produced by another system.
 - `moldette-core`: the types the layers exchange.
 - `moldette-cli`: the `moldette` command, which checks a configuration file
   and runs it over records.
+- `moldette-spec`: output formats of responses. The `json` feature writes a
+  response as the command prints it, through `serde`.
 
 Of the moldette crates, each layer crate depends only on `moldette-core`. No
 library crate performs I/O or keeps global state, and each builds for

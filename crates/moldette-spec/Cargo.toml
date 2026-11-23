@@ -1,0 +1,26 @@
+[package]
+name = "moldette-spec"
+version.workspace = true
+description = "Output formats of moldette responses, such as JSON through serde"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords = ["etl", "schema", "json", "serde"]
+categories = ["encoding"]
+
+[dependencies]
+moldette-core = { workspace = true }
+serde_core = { version = "1.0.229", optional = true }
+time = { version = "0.3.55", default-features = false, features = ["formatting"], optional = true }
+
+[dev-dependencies]
+serde_json = "1.0.154"
+
+[features]
+default = ["json"]
+json = ["dep:serde_core", "dep:time"]
+
+[package.metadata.docs.rs]
+all-features = true
