@@ -1,5 +1,7 @@
+use std::any::Any;
 use std::mem;
 use std::num::NonZeroUsize;
+use std::panic::{self, AssertUnwindSafe};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -103,26 +105,49 @@ fn work(pipeline: &Pipeline, receiver: &Mutex<Receiver<Job>>) {
     }
 }
 
+/// Writes one response line per record. A record whose processing panics
+/// ends the batch with an error, and the worker thread goes on with the next
+/// batch.
 fn process(pipeline: &Pipeline, batch: &Batch) -> (Vec<u8>, Option<RecordError>) {
     let mut output = Vec::with_capacity(batch.text.len() * 2);
+    let mut error = None;
     let mut start = 0;
     for (index, &end) in batch.ends.iter().enumerate() {
-        let response = pipeline.process(&batch.text[start..end]);
+        let raw = &batch.text[start..end];
         start = end;
-        if let Err(err) = serde_json::to_writer(&mut output, &JsonResponse::new(&response)) {
-            return (
-                output,
-                Some(RecordError {
-                    record: batch.first_record + index,
-                    message: err.to_string(),
-                }),
-            );
-        }
-        output.push(b'\n');
+        let line_start = output.len();
+        let written = panic::catch_unwind(AssertUnwindSafe(|| {
+            serde_json::to_writer(&mut output, &JsonResponse::new(&pipeline.process(raw)))
+        }));
+        let message = match written {
+            Ok(Ok(())) => {
+                output.push(b'\n');
+                continue;
+            }
+            Ok(Err(err)) => err.to_string(),
+            Err(payload) => format!(
+                "processing the record panicked: {}",
+                panic_message(&*payload)
+            ),
+        };
+        output.truncate(line_start);
+        error = Some(RecordError {
+            record: batch.first_record + index,
+            message,
+        });
+        break;
     }
     // The budget counts lengths, and the output waits for the client.
     output.shrink_to_fit();
-    (output, None)
+    (output, error)
+}
+
+fn panic_message(payload: &(dyn Any + Send)) -> &str {
+    payload
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+        .unwrap_or("no message")
 }
 
 impl Batch {
@@ -193,7 +218,92 @@ impl Batcher {
 
 #[cfg(test)]
 mod tests {
+    use std::borrow::Cow;
+
+    use moldette::mapper::{MapperSpec, Op, Rule};
+    use moldette::parser::{Format, ParserSpec};
+    use moldette::resp::RespSpec;
+    use moldette::{Field, OutputSchema, Type};
+    use tokio::sync::Semaphore;
+    use tokio::sync::mpsc::unbounded_channel;
+
     use super::*;
+
+    #[derive(Debug)]
+    struct PanicsOnBoom;
+
+    impl Op for PanicsOnBoom {
+        fn apply<'a>(&'a self, text: &'a str) -> Option<Cow<'a, str>> {
+            assert_ne!(text, "boom", "the op refuses boom");
+            Some(Cow::Borrowed(text))
+        }
+
+        fn name(&self) -> &str {
+            "panics_on_boom"
+        }
+    }
+
+    fn panicking_pipeline() -> Pipeline {
+        let schema = OutputSchema::builder("t", 1)
+            .field(Field::new("v", Type::String))
+            .build()
+            .expect("schema");
+        let parser = ParserSpec::builder(Format::Json)
+            .field("v", "/v")
+            .build()
+            .expect("parser");
+        let mapper = MapperSpec::builder(schema.clone())
+            .rule(Rule::new("v", "v").via(PanicsOnBoom))
+            .build()
+            .expect("mapper");
+        Pipeline::new(parser, mapper, RespSpec::builder(schema).build())
+    }
+
+    fn run(pool: &Pool, records: &[&str]) -> Processed {
+        let mut batcher = Batcher::new();
+        for record in records {
+            batcher.add(record);
+        }
+        batcher.close();
+        let (results, mut received) = unbounded_channel();
+        for batch in batcher.take_full() {
+            assert!(
+                pool.submit(Job {
+                    batch,
+                    permit: Arc::new(Semaphore::new(1))
+                        .try_acquire_owned()
+                        .expect("permit"),
+                    budget: Arc::new(Budget::new(1 << 20)),
+                    results: results.clone(),
+                })
+            );
+        }
+        // A worker that dies drops the job's sender, which ends the channel.
+        drop(results);
+        match received.blocking_recv() {
+            Some(Message::Processed(processed)) => processed,
+            _ => panic!("no processed batch"),
+        }
+    }
+
+    #[test]
+    fn a_panicking_record_ends_its_batch_and_the_worker_goes_on() {
+        let pool = Pool::new(panicking_pipeline(), NonZeroUsize::MIN);
+        let failed = run(&pool, &[r#"{"v":"a"}"#, r#"{"v":"boom"}"#, r#"{"v":"c"}"#]);
+        let error = failed.error.expect("an error");
+        assert_eq!(error.record, 2);
+        assert!(
+            error.message.contains("the op refuses boom"),
+            "{}",
+            error.message
+        );
+        assert_eq!(
+            String::from_utf8(failed.output).expect("UTF-8"),
+            "{\"status\":\"ok\",\"fields\":{\"v\":\"a\"},\"emptied\":[]}\n"
+        );
+        let next = run(&pool, &[r#"{"v":"d"}"#]);
+        assert!(next.error.is_none());
+    }
 
     fn sizes(records: &[&str]) -> Vec<(usize, usize)> {
         let mut batcher = Batcher::new();
