@@ -799,9 +799,8 @@ version = "0.5.0"
 dependencies = [
  "flate2",
  "moldette",
- "serde_core",
+ "moldette-spec",
  "serde_json",
- "time",
 ]
 
 [[package]]
@@ -864,6 +863,16 @@ dependencies = [
  "moldette-core",
  "moldette-test-tracing",
  "tracing",
+]
+
+[[package]]
+name = "moldette-spec"
+version = "0.5.0"
+dependencies = [
+ "moldette-core",
+ "serde_core",
+ "serde_json",
+ "time",
 ]
 
 [[package]]

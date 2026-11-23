@@ -64,7 +64,13 @@ moldette-config     configuration -> specs, cross-layer checks, lineage
 moldette            pipeline facade, layers selected by feature; record framing
    ^           ^
 moldette-cli   moldette-sidecar    `moldette` binary; record processing over HTTP, container image
+   |           |
+   v           v
+moldette-spec       output formats of responses (JSON); depends on moldette-core only
 ```
+
+No pipeline crate depends on `moldette-spec`, so the library has no
+serialization dependency (#84).
 
 ## Built-in components
 
@@ -193,7 +199,7 @@ and the first users, input shapes and sidecar release `v0.6.0`.
 
 1. `moldette::framing`: record framing without I/O for `lines`, `multiline` (a record start pattern) and `json` (concatenated values or the elements of a top-level array), fed text in chunks (#103)
 2. CLI `--records <lines|multiline|json>` and `--record-start <pattern>`; input files ending in `.gz` decompressed
-3. `moldette-sidecar`: a separate binary run in the application's pod, with one configuration loaded at start; `POST /v1/process` frames the streamed request body into records, processes them in parallel and streams NDJSON responses in input order; `GET /healthz` and `GET /readyz` for probes; no explain or lineage, which the CLI covers; listening on `127.0.0.1` by default, with limits on request size and processing time
+3. `moldette-spec`: the JSON representation of responses, moved out of the CLI and shared with the sidecar. `moldette-sidecar`: a separate binary run in the application's pod, with one configuration loaded at start; `POST /v1/process` frames the streamed request body into records, processes them in parallel and streams NDJSON responses in input order; `GET /healthz` and `GET /readyz` for probes; no explain or lineage, which the CLI covers; listening on `127.0.0.1` by default, with limits on request size and processing time
 4. sidecar container image: distroless static with the sidecar binary only, run as a non-root user on a read-only file system, for `linux/amd64` and `linux/arm64`, pushed to GHCR from tags with artifact attestations; a Kubernetes example with the sidecar in a pod and a restricted security context
 5. `docs/CONFIGURATION.md`: every configuration key and op argument, with the example YAML checked by tests
 6. `examples/configs/`: configurations, inputs and expected outputs for an access log, syslog, a JSON API response and a CSV export, run by the CLI in CI

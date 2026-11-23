@@ -13,9 +13,9 @@ use std::thread;
 use flate2::bufread::MultiGzDecoder;
 use moldette::framing::Framer;
 use moldette::{Explain, Pipeline, Response};
+use moldette_spec::json::JsonResponse;
 
 use crate::load;
-use crate::response::Printed;
 
 const BATCH_RECORDS: usize = 256;
 const BATCH_BYTES: usize = 1 << 20;
@@ -266,7 +266,11 @@ fn write_line(
     response: &Response<'_>,
     explain: Option<Option<&Explain<'_>>>,
 ) -> serde_json::Result<()> {
-    serde_json::to_writer(&mut *output, &Printed { response, explain })?;
+    let json = match explain {
+        Some(explain) => JsonResponse::with_explain(response, explain),
+        None => JsonResponse::new(response),
+    };
+    serde_json::to_writer(&mut *output, &json)?;
     output.push(b'\n');
     Ok(())
 }
