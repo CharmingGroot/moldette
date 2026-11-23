@@ -126,10 +126,10 @@ Probes that cannot reach the loopback address, such as those of the kubelet,
 use `--health-listen <address>`, which answers only `GET /healthz` and
 `GET /readyz`.
 
-Configuration examples for a JSON API response, a CSV export and an nginx
-access log are in `crates/moldette-config/tests/fixtures`. The
-`examples/otlp` program sends the spans of a pipeline to an OpenTelemetry
-collector.
+`examples/configs` holds configurations for an nginx access log, syslog, a
+JSON API response and a CSV export, each with an input and the output of
+`moldette run`. The `examples/otlp` program sends the spans of a pipeline to
+an OpenTelemetry collector.
 
 ## Installation
 

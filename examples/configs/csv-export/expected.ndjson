@@ -1,0 +1,4 @@
+{"status":"ok","fields":{"id":"A-2001","placed_at":"2026-11-18T09:30:00+09:00","customer":"C-100","product":"Notebook","quantity":3,"unit_price":4.5,"gift":false},"emptied":[]}
+{"status":"ok","fields":{"id":"A-2002","placed_at":"2026-11-18T09:31:15+09:00","customer":"C-101","product":"Desk lamp, brass","quantity":1,"unit_price":39.9,"gift":true,"note":"Leave at the \"side\" door"},"emptied":[]}
+{"status":"missing_required","fields":["quantity"]}
+{"status":"ok","fields":{"id":"A-2004","placed_at":"2026-11-18T09:33:05+09:00","product":"Mug","quantity":1,"note":"fragile"},"emptied":["unit_price","gift"]}

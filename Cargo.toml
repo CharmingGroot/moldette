@@ -1,5 +1,6 @@
 [workspace]
 members = ["benches/*", "crates/*", "examples/*"]
+exclude = ["examples/configs"]
 resolver = "3"
 
 [workspace.package]

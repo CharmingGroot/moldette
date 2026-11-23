@@ -1,0 +1,4 @@
+<30>Nov 18 09:30:00 web-1 orders[4721]: order A-1 saved in 12 ms
+<27>Nov 18 09:30:04 web-1 orders[4721]: payment provider timed out after 3000 ms
+<13>Nov  8 23:59:59 db-2 backup: nightly dump finished
+Nov 18 09:31:00 web-1 orders: no priority

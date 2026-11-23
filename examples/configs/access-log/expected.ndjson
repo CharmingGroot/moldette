@@ -1,0 +1,4 @@
+{"status":"ok","fields":{"client":"203.0.113.7","time":"2026-11-18T09:30:00+09:00","method":"GET","path":"/orders","http_version":"1.1","status":200,"status_class":"success","bytes":5120,"referer":"https://shop.example/","user_agent":"Mozilla/5.0 (X11; Linux x86_64)"},"emptied":[]}
+{"status":"ok","fields":{"client":"198.51.100.23","user":"alice","time":"2026-11-18T09:30:02+09:00","method":"POST","path":"/orders","http_version":"2.0","status":201,"status_class":"success","bytes":87,"user_agent":"curl/8.5.0"},"emptied":[]}
+{"status":"ok","fields":{"client":"2001:db8::5","time":"2026-11-18T09:30:05+09:00","method":"GET","path":"/health","http_version":"1.1","status":503,"status_class":"server_error","bytes":0,"user_agent":"kube-probe/1.31"},"emptied":[]}
+{"status":"malformed","reason":"record does not match the pattern"}

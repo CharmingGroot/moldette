@@ -6,8 +6,8 @@ and a crate that depends on it through another crate is compiled (check).
 A change to core, to a shared kernel module or to a crate root counts as a
 change to every module of that crate, and core runs every crate that uses it
 in full. A `Cargo.lock` change runs in full the crates whose resolved
-dependency tree changed. A document with tested examples runs the test target
-of its examples. `moldette-cli`, `moldette-sidecar` and a crate under
+dependency tree changed. A document or directory of tested examples runs the
+tests of its examples. `moldette-cli`, `moldette-sidecar` and a crate under
 `examples/` or `benches/` skip the wasm32 build and, unless they changed themselves, are only
 compiled (#84); a benchmark crate with allocation tests runs those instead
 (#64).
@@ -50,8 +50,12 @@ HOST_ONLY_DIRS = (
     "examples/", "benches/", "crates/moldette-cli/", "crates/moldette-sidecar/",
 )
 LOWERING_TESTS = "--test lowering"
-# Documents whose examples a test target runs.
-DOC_TESTS = {"docs/CONFIGURATION.md": ("moldette-config", "--test docs")}
+# Files outside the crates whose examples a test target runs, with its name
+# filters; a key ending in `/` covers a directory.
+EXAMPLE_TESTS = {
+    "docs/CONFIGURATION.md": ("moldette-config", "--test docs", None),
+    "examples/configs/": ("moldette-cli", "--test cli", {"examples::"}),
+}
 E2E_TESTS = "--test e2e"
 ALLOCATION_TESTS = "--test allocations"
 ALLOCATION_CRATES = (
@@ -94,6 +98,11 @@ class Workspace:
 
     def is_host_only(self, crate: str) -> bool:
         return (self.dirs[crate] + "/").startswith(HOST_ONLY_DIRS)
+
+
+def example_tests(files: list[str]) -> list[tuple[str, str, Filters]]:
+    return [test for path, test in EXAMPLE_TESTS.items()
+            if any(f.startswith(path) if path.endswith("/") else f == path for f in files)]
 
 
 def is_full_path(path: str) -> bool:
@@ -198,9 +207,11 @@ def plan(files: list[str], workspace: Workspace, graphs: dict[str, Graph],
     scopes = {crate: "full" for crate in lock_changed}
     tests: dict[str, dict[str, Filters]] = {}
     changes = changed_modules(files, workspace, graphs)
-    for crate, target in (DOC_TESTS[f] for f in files if f in DOC_TESTS):
+    examples = example_tests(files)
+    for crate, target, filters in examples:
         raise_scope(scopes, crate, "edge")
-        merge_tests(tests.setdefault(crate, {}), {target: None})
+        merge_tests(tests.setdefault(crate, {}), {target: filters})
+    example_crates = {crate for crate, _, _ in examples}
     for crate, modules in changes.items():
         raise_scope(scopes, crate, "full")
         if crate in SHARED_KERNEL_CRATES:
@@ -218,7 +229,8 @@ def plan(files: list[str], workspace: Workspace, graphs: dict[str, Graph],
                 for indirect in workspace.users(dependent, dev=False):
                     raise_scope(scopes, indirect, "check")
     for crate in scopes:
-        if workspace.is_host_only(crate) and crate not in changes and crate not in lock_changed:
+        if (workspace.is_host_only(crate) and crate not in changes and crate not in lock_changed
+                and crate not in example_crates):
             if crate in ALLOCATION_CRATES:
                 scopes[crate] = "edge"
                 tests[crate] = {ALLOCATION_TESTS: None}

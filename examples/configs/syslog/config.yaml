@@ -1,0 +1,41 @@
+# syslog lines in the BSD format (RFC 3164), which carry no year.
+schemas:
+  - name: syslog
+    version: 1
+    fields:
+      - {name: time, type: timestamp, required: true}
+      - {name: priority, type: int}
+      - {name: host, type: string, required: true}
+      - {name: app, type: string}
+      - {name: pid, type: int}
+      - {name: message, type: string}
+
+parser:
+  format: regex
+  pattern: '^<(?P<pri>\d{1,3})>(?P<timestamp>[A-Z][a-z]{2} [ \d]\d \d{2}:\d{2}:\d{2}) (?P<host>\S+) (?P<app>[^\[:\s]+)(?:\[(?P<pid>\d+)\])?: (?P<message>.*)$'
+  fields:
+    pri: pri
+    timestamp: timestamp
+    host: host
+    app: app
+    pid: pid
+    message: message
+
+mapper:
+  schema: {name: syslog, version: 1}
+  rules:
+    - target: time
+      from: timestamp
+      via:
+        - timestamp:
+            formats: ["[month repr:short] [day padding:space] [hour]:[minute]:[second]"]
+            year: 2026
+            offset: "+09:00"
+    - {target: priority, from: pri}
+    - {target: host, from: host}
+    - {target: app, from: app}
+    - {target: pid, from: pid}
+    - {target: message, from: message}
+
+resp:
+  schema: {name: syslog, version: 1}

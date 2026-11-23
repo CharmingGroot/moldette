@@ -37,6 +37,7 @@ pub fn stderr(output: &Output) -> String {
 }
 
 mod check;
+mod examples;
 mod explain;
 mod records;
 mod run;

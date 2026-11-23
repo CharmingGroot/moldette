@@ -1,0 +1,29 @@
+[
+  {
+    "id": "A-1001",
+    "status": "PAID",
+    "customer": {"id": "C-100", "address": {"city": "Springfield"}},
+    "items": [{"sku": "S-1", "quantity": 2}, {"sku": "S-2", "quantity": 1}],
+    "item_count": 2,
+    "amount": {"value": "25.50", "currency": "USD"},
+    "paid": true,
+    "created_at": "2026-11-18T09:30:00Z"
+  },
+  {
+    "id": "A-1002",
+    "status": "REFUND_REQUESTED",
+    "customer": {"email": "b@example.com", "address": null},
+    "items": [],
+    "item_count": 0,
+    "amount": {"value": 40},
+    "paid": false,
+    "created_at": "2026-11-18T18:45:10+09:00"
+  },
+  {
+    "id": "A-1003",
+    "status": "PENDING",
+    "customer": {"id": "C-102"},
+    "amount": {"value": "unknown", "currency": "EUR"},
+    "created_at": "2026-11-18T10:00:00Z"
+  }
+]

@@ -1,0 +1,46 @@
+# Orders returned by a JSON API as one array; run with `--records json`.
+schemas:
+  - name: order
+    version: 1
+    fields:
+      - {name: id, type: string, required: true}
+      - {name: status, type: string}
+      - {name: customer, type: string}
+      - {name: city, type: string}
+      - {name: first_sku, type: string}
+      - {name: item_count, type: int}
+      - {name: total, type: float, required: true}
+      - {name: currency, type: string}
+      - {name: paid, type: bool}
+      - {name: created_at, type: timestamp, required: true}
+
+parser:
+  format: json
+  fields:
+    id: /id
+    status: /status
+    customer_id: /customer/id
+    customer_email: /customer/email
+    city: /customer/address/city
+    first_sku: /items/0/sku
+    item_count: /item_count
+    amount: /amount/value
+    currency: /amount/currency
+    paid: /paid
+    created_at: /created_at
+
+mapper:
+  schema: {name: order, version: 1}
+  rules:
+    - target: status
+      from: status
+      via:
+        - lookup:
+            table: {PAID: paid, ON_HOLD: on hold, PENDING: pending}
+            keep_unmatched: true
+    - {target: customer, from: customer_id, fallback: customer_email}
+    - {target: total, from: amount}
+    - {target: currency, from: currency, default: EUR}
+
+resp:
+  schema: {name: order, version: 1}
