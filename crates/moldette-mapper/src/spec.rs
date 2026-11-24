@@ -515,6 +515,45 @@ mod tests {
     }
 
     #[test]
+    fn timestamp_reads_a_date_alone_as_the_start_of_the_day() {
+        let at = |defaults: TimestampDefaults, text: &str| {
+            map_with(
+                Rule::new("ordered_at", "at")
+                    .timestamp_with(["[year]-[month]-[day]", "[day]/[month]/[year]"], defaults),
+                &[("at", text)],
+            )
+            .get("ordered_at")
+            .cloned()
+        };
+        let timestamp = |seconds, offset| Timestamp::new(seconds, 0, offset).map(Value::Timestamp);
+        let cases = [
+            (
+                TimestampDefaults::new(),
+                "2023-11-14",
+                timestamp(1_699_920_000, 0),
+            ),
+            (
+                TimestampDefaults::new(),
+                "14/11/2023",
+                timestamp(1_699_920_000, 0),
+            ),
+            (
+                TimestampDefaults::new().offset("+09:00"),
+                "2023-11-14",
+                timestamp(1_699_887_600, 9 * 60 * 60),
+            ),
+            (TimestampDefaults::new(), "2023-02-30", None),
+        ];
+        for (defaults, text, expected) in cases {
+            assert_eq!(
+                at(defaults.clone(), text),
+                expected,
+                "{defaults:?} {text:?}"
+            );
+        }
+    }
+
+    #[test]
     fn coalesce_takes_the_first_present_source_before_ops() {
         let rule = Rule::coalesce("quantity", ["qty", "count", "n"]).trim();
 

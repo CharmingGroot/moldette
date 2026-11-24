@@ -122,8 +122,9 @@ impl Rule {
 
     /// Reads the text with the first of `formats` that matches it and writes
     /// it as RFC 3339. Formats use the version 2 format description syntax of
-    /// the `time` crate; a format without an offset reads the text as UTC. The
-    /// build fails when `formats` is empty or a format is not valid.
+    /// the `time` crate; a format without an offset reads the text as UTC, and
+    /// one without a time of day reads the start of the day. The build fails
+    /// when `formats` is empty or a format is not valid.
     pub fn timestamp(self, formats: impl IntoIterator<Item = impl Into<String>>) -> Self {
         self.timestamp_with(formats, TimestampDefaults::new())
     }

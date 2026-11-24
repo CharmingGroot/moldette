@@ -463,8 +463,9 @@ map from one op name to its arguments.
 
 `timestamp` formats use the format description syntax, version 2, of the Rust
 `time` crate, such as `[day]/[month]/[year] [hour]:[minute]`. A format that
-reads no year takes `year` (up to 9999), and a format that reads no
-offset takes `offset`, or UTC without it. `default` and `keep_unmatched` of
+reads no year takes `year` (up to 9999), a format that reads no offset takes
+`offset`, or UTC without it, and a format that reads no time of day reads the
+start of the day, such as `[year]-[month]-[day]` for `2026-11-18`. `default` and `keep_unmatched` of
 `lookup` cannot be given together.
 
 ```yaml
