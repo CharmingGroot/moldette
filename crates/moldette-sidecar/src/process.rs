@@ -6,6 +6,7 @@ use std::task::{Context, Poll};
 
 use http_body_util::BodyExt;
 use hyper::body::{Body, Bytes, Frame, Incoming};
+use moldette::Pipeline;
 use serde_json::json;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
@@ -14,6 +15,7 @@ use tokio::time::{Instant, timeout_at};
 use crate::budget::Budget;
 use crate::pool::{Batch, Batcher, Job, Message, RecordError};
 use crate::state::State;
+use crate::targets::Target;
 
 /// The streamed body of a `POST /v1/process` response.
 pub(crate) struct Output {
@@ -39,10 +41,15 @@ impl Body for Output {
     }
 }
 
-/// Starts processing `body` and returns the response body that streams the
-/// output. `request` holds this request's place among the requests allowed at
-/// once until processing ends.
-pub(crate) fn start(state: Arc<State>, body: Incoming, request: OwnedSemaphorePermit) -> Output {
+/// Starts processing `body` with `target` and returns the response body that
+/// streams the output. `request` holds this request's place among the
+/// requests allowed at once until processing ends.
+pub(crate) fn start(
+    state: Arc<State>,
+    target: Arc<Target>,
+    body: Incoming,
+    request: OwnedSemaphorePermit,
+) -> Output {
     let (sender, receiver) = mpsc::unbounded_channel();
     let budget = Arc::new(Budget::new(state.limits.max_buffer_bytes));
     let output = Output {
@@ -50,7 +57,7 @@ pub(crate) fn start(state: Arc<State>, body: Incoming, request: OwnedSemaphorePe
         budget: Arc::clone(&budget),
     };
     tokio::spawn(async move {
-        run(state, body, Sink { sender, budget }).await;
+        run(state, target, body, Sink { sender, budget }).await;
         drop(request);
     });
     output
@@ -77,11 +84,12 @@ impl Sink {
     }
 }
 
-async fn run(state: Arc<State>, body: Incoming, sink: Sink) {
+async fn run(state: Arc<State>, target: Arc<Target>, body: Incoming, sink: Sink) {
     let deadline = Instant::now() + state.limits.timeout;
     let (results, mut received) = mpsc::unbounded_channel();
     let reader = tokio::spawn(read(
         Arc::clone(&state),
+        target,
         body,
         Arc::clone(&sink.budget),
         results,
@@ -101,12 +109,13 @@ async fn run(state: Arc<State>, body: Incoming, sink: Sink) {
 
 async fn read(
     state: Arc<State>,
+    target: Arc<Target>,
     mut body: Incoming,
     budget: Arc<Budget>,
     results: UnboundedSender<Message>,
 ) {
     let permits = Arc::new(Semaphore::new(state.threads.get() * 2));
-    let mut framer = state.framer.clone();
+    let mut framer = target.framer.clone();
     let mut batcher = Batcher::new();
     let mut received = 0;
     let error = loop {
@@ -137,7 +146,7 @@ async fn read(
         // A client may stream records slowly; what arrived is processed now.
         batcher.close();
         for batch in batcher.take_full() {
-            if !submit(&state, &permits, &budget, &results, batch).await {
+            if !submit(&state, &target.pipeline, &permits, &budget, &results, batch).await {
                 return;
             }
         }
@@ -151,7 +160,7 @@ async fn read(
     });
     batcher.close();
     for batch in batcher.take_full() {
-        if !submit(&state, &permits, &budget, &results, batch).await {
+        if !submit(&state, &target.pipeline, &permits, &budget, &results, batch).await {
             return;
         }
     }
@@ -163,6 +172,7 @@ async fn read(
 
 async fn submit(
     state: &State,
+    pipeline: &Arc<Pipeline>,
     permits: &Arc<Semaphore>,
     budget: &Arc<Budget>,
     results: &UnboundedSender<Message>,
@@ -173,6 +183,7 @@ async fn submit(
     };
     budget.hold(batch.len());
     state.pool.submit(Job {
+        pipeline: Arc::clone(pipeline),
         batch,
         permit,
         budget: Arc::clone(budget),

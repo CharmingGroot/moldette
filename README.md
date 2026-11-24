@@ -106,6 +106,19 @@ arrives:
     moldette-sidecar --records json order.yaml
     curl --data-binary @orders.json http://127.0.0.1:8095/v1/process
 
+Several configurations can run in one sidecar, each under a name and at its
+own path. `--records` and `--record-start` without a name apply to every
+configuration:
+
+    moldette-sidecar --records orders=json orders=order.yaml access=access.yaml
+    curl --data-binary @orders.json http://127.0.0.1:8095/v1/process/orders
+
+The configurations share the threads and the limits below, so a burst of
+requests for one of them slows the others; a configuration that must not be
+affected runs in a sidecar of its own. A changed configuration takes effect
+when the sidecar restarts. Each response names its configuration by digest in
+the `moldette-config-digest` header.
+
 When the body cannot be read to the end, for example when a record is not
 valid UTF-8, the responses before it are followed by a line such as
 `{"error":{"message":"not valid UTF-8","record":2}}`. Request size, record

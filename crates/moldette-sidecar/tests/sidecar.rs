@@ -6,7 +6,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use moldette::Pipeline;
-use moldette::config::{Config, Registry};
+use moldette::config::{Config, Registry, Specs};
 use moldette_spec::json::JsonResponse;
 
 const CONFIG: &str = concat!(
@@ -17,6 +17,14 @@ const DATA: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../moldette/tests/data/order_api.ndjson"
 );
+const EXPORT_CONFIG: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../moldette-config/tests/fixtures/order_export.yaml"
+);
+const EXPORT_DATA: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../moldette/tests/data/order_export.csv"
+);
 
 struct Sidecar {
     child: Child,
@@ -26,10 +34,14 @@ struct Sidecar {
 
 impl Sidecar {
     fn start(options: &[&str]) -> Self {
+        Self::start_with([options, &[CONFIG]].concat().as_slice())
+    }
+
+    /// Starts the sidecar with `args`, the configurations included.
+    fn start_with(args: &[&str]) -> Self {
         let mut child = Command::new(env!("CARGO_BIN_EXE_moldette-sidecar"))
             .args(["--listen", "127.0.0.1:0"])
-            .args(options)
-            .arg(CONFIG)
+            .args(args)
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
             .spawn()
@@ -75,8 +87,12 @@ impl Sidecar {
     }
 
     fn post(&self, body: &[u8]) -> Reply {
+        self.post_to("/v1/process", body)
+    }
+
+    fn post_to(&self, path: &str, body: &[u8]) -> Reply {
         let mut request = format!(
-            "POST /v1/process HTTP/1.1\r\nHost: sidecar\r\nConnection: close\r\nContent-Length: {}\r\n\r\n",
+            "POST {path} HTTP/1.1\r\nHost: sidecar\r\nConnection: close\r\nContent-Length: {}\r\n\r\n",
             body.len()
         )
         .into_bytes();
@@ -207,6 +223,13 @@ impl Reply {
         }
     }
 
+    fn header(&self, name: &str) -> Option<&str> {
+        self.headers.lines().find_map(|line| {
+            let (key, value) = line.split_once(':')?;
+            key.eq_ignore_ascii_case(name).then(|| value.trim())
+        })
+    }
+
     fn text(&self) -> String {
         String::from_utf8(self.body.clone()).expect("UTF-8 body")
     }
@@ -223,12 +246,27 @@ fn orders() -> String {
     fs::read_to_string(DATA).expect("order API data")
 }
 
-fn expected(input: &str) -> String {
-    let yaml = fs::read_to_string(CONFIG).expect("configuration");
-    let specs = Config::from_yaml(&yaml)
+/// The well-formed orders of the data as one JSON array, and the same records
+/// one per line.
+fn orders_json() -> (String, String) {
+    let lines: Vec<String> = orders().lines().take(6).map(str::to_owned).collect();
+    (format!("[{}]", lines.join(",\n")), lines.join("\n") + "\n")
+}
+
+fn specs(config: &str) -> Specs {
+    let yaml = fs::read_to_string(config).expect("configuration");
+    Config::from_yaml(&yaml)
         .expect("configuration parses")
         .build(&Registry::new())
-        .expect("configuration builds");
+        .expect("configuration builds")
+}
+
+fn expected(input: &str) -> String {
+    expected_with(CONFIG, input)
+}
+
+fn expected_with(config: &str, input: &str) -> String {
+    let specs = specs(config);
     let pipeline = Pipeline::from_specs(&specs).expect("pipeline");
     input
         .lines()
@@ -376,6 +414,88 @@ fn the_health_address_answers_only_probes() {
 }
 
 #[test]
+fn named_configurations_answer_at_their_paths_with_their_framing() {
+    let orders = format!("orders={CONFIG}");
+    let export = format!("export={EXPORT_CONFIG}");
+    let sidecar = Sidecar::start_with(&["--records", "orders=json", &orders, &export]);
+    let (array, lines) = orders_json();
+    let reply = sidecar.post_to("/v1/process/orders", array.as_bytes());
+    assert_eq!(reply.status, 200);
+    assert_eq!(reply.text(), expected(&lines));
+    assert_eq!(
+        reply.header("moldette-config-digest"),
+        Some(specs(CONFIG).digest())
+    );
+    let csv = fs::read_to_string(EXPORT_DATA).expect("export data");
+    let reply = sidecar.post_to("/v1/process/export", csv.as_bytes());
+    assert_eq!(reply.text(), expected_with(EXPORT_CONFIG, &csv));
+    assert_eq!(
+        reply.header("moldette-config-digest"),
+        Some(specs(EXPORT_CONFIG).digest())
+    );
+    let unnamed = sidecar.post_to("/v1/process", b"{}");
+    assert_eq!(unnamed.status, 404);
+    assert!(
+        unnamed.text().contains("/v1/process/{name}"),
+        "{}",
+        unnamed.text()
+    );
+    let ghost = sidecar.post_to("/v1/process/ghost", b"{}");
+    assert_eq!(ghost.status, 404);
+    assert!(ghost.text().contains("`ghost`"), "{}", ghost.text());
+    let get = sidecar.get("/v1/process/orders");
+    assert_eq!(get.status, 405);
+}
+
+#[test]
+fn a_record_start_prefixed_by_a_name_is_for_that_configuration() {
+    let orders = format!("orders={CONFIG}");
+    let export = format!("export={EXPORT_CONFIG}");
+    let sidecar = Sidecar::start_with(&[
+        "--records",
+        "orders=multiline",
+        "--record-start",
+        "orders=^\\{",
+        &orders,
+        &export,
+    ]);
+    let (_, lines) = orders_json();
+    let reply = sidecar.post_to("/v1/process/orders", lines.as_bytes());
+    assert_eq!(reply.text(), expected(&lines));
+}
+
+#[test]
+fn a_record_start_without_a_name_is_for_the_multiline_configurations() {
+    let orders = format!("orders={CONFIG}");
+    let export = format!("export={EXPORT_CONFIG}");
+    let sidecar = Sidecar::start_with(&[
+        "--records",
+        "orders=multiline",
+        "--record-start",
+        "^\\{",
+        &orders,
+        &export,
+    ]);
+    let (_, lines) = orders_json();
+    let reply = sidecar.post_to("/v1/process/orders", lines.as_bytes());
+    assert_eq!(reply.text(), expected(&lines));
+    let csv = fs::read_to_string(EXPORT_DATA).expect("export data");
+    let reply = sidecar.post_to("/v1/process/export", csv.as_bytes());
+    assert_eq!(reply.text(), expected_with(EXPORT_CONFIG, &csv));
+}
+
+#[test]
+fn one_configuration_without_a_name_sends_its_digest() {
+    let sidecar = Sidecar::start(&[]);
+    let reply = sidecar.post(orders().as_bytes());
+    assert_eq!(
+        reply.header("moldette-config-digest"),
+        Some(specs(CONFIG).digest())
+    );
+    assert_eq!(sidecar.post_to("/v1/process/orders", b"{}").status, 404);
+}
+
+#[test]
 fn unknown_paths_and_methods_are_refused() {
     let sidecar = Sidecar::start(&[]);
     assert_eq!(sidecar.get("/v1/explain").status, 404);
@@ -429,6 +549,7 @@ fn fails_on_bad_arguments_and_configuration_before_listening() {
         &["--max-requests", "0", CONFIG],
         &["--max-buffer-bytes", "0", CONFIG],
         &["--health-listen", "localhost", CONFIG],
+        &["--record-start", "^x", CONFIG],
         &[CONFIG, CONFIG],
     ] {
         let output = run(args);
@@ -443,6 +564,55 @@ fn fails_on_bad_arguments_and_configuration_before_listening() {
     let stderr = String::from_utf8_lossy(&missing.stderr);
     assert!(stderr.starts_with("error: missing.yaml: "), "{stderr}");
     assert!(!stderr.contains("listening"));
+}
+
+#[test]
+fn named_configurations_are_checked_before_listening() {
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_moldette-sidecar"))
+            .args(args)
+            .output()
+            .expect("the sidecar runs")
+    };
+    let orders = format!("orders={CONFIG}");
+    let export = format!("export={EXPORT_CONFIG}");
+    for (args, message) in [
+        (
+            vec![orders.as_str(), orders.as_str()],
+            "configuration `orders` is given twice",
+        ),
+        (
+            vec!["--records", "ghost=json", orders.as_str()],
+            "--records: no configuration is named `ghost`",
+        ),
+        (
+            vec![
+                "--records",
+                "orders=json",
+                "--records",
+                "orders=lines",
+                orders.as_str(),
+            ],
+            "--records is given twice for `orders`",
+        ),
+    ] {
+        let output = run(&args);
+        assert_eq!(output.status.code(), Some(2), "{args:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(stderr.trim_end(), format!("error: {message}"), "{args:?}");
+    }
+    for args in [
+        vec!["bad/name=x.yaml"],
+        vec![orders.as_str(), CONFIG],
+        vec!["--record-start", "^x", orders.as_str(), export.as_str()],
+    ] {
+        let output = run(&args);
+        assert_eq!(output.status.code(), Some(2), "{args:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).starts_with("Usage: moldette-sidecar"),
+            "{args:?}"
+        );
+    }
 }
 
 #[test]

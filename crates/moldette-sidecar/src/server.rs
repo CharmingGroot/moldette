@@ -8,7 +8,7 @@ use std::time::Duration;
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Full};
 use hyper::body::{Body, Bytes, Incoming};
-use hyper::header::{ALLOW, CONTENT_TYPE, HeaderValue, RETRY_AFTER};
+use hyper::header::{ALLOW, CONTENT_TYPE, HeaderName, HeaderValue, RETRY_AFTER};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Method, Request, Response, StatusCode};
@@ -20,8 +20,11 @@ use tokio::time::sleep;
 
 use crate::process;
 use crate::state::State;
+use crate::targets::Target;
 
 const HEADER_TIMEOUT: Duration = Duration::from_secs(10);
+/// The digest of the configuration that processed a request (#122).
+const CONFIG_DIGEST: HeaderName = HeaderName::from_static("moldette-config-digest");
 const ACCEPT_RETRY: Duration = Duration::from_millis(100);
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 
@@ -100,17 +103,47 @@ fn route(
     endpoints: Endpoints,
 ) -> Response<ResponseBody> {
     let method = request.method();
-    match (request.uri().path(), endpoints) {
-        ("/healthz", _) if method == Method::GET => text(StatusCode::OK, "ok\n"),
-        ("/readyz", _) if method == Method::GET => text(StatusCode::OK, "ready\n"),
-        ("/healthz" | "/readyz", _) => not_allowed("GET"),
-        ("/v1/process", Endpoints::All) if method == Method::POST => process(state, request),
-        ("/v1/process", Endpoints::All) => not_allowed("POST"),
-        _ => error(StatusCode::NOT_FOUND, "no such endpoint"),
+    let path = request.uri().path();
+    match (path, endpoints) {
+        ("/healthz", _) if method == Method::GET => return text(StatusCode::OK, "ok\n"),
+        ("/readyz", _) if method == Method::GET => return text(StatusCode::OK, "ready\n"),
+        ("/healthz" | "/readyz", _) => return not_allowed("GET"),
+        (_, Endpoints::Health) => return error(StatusCode::NOT_FOUND, "no such endpoint"),
+        _ => {}
+    }
+    let Some(name) = process_name(path) else {
+        return error(StatusCode::NOT_FOUND, "no such endpoint");
+    };
+    let Some(target) = state.targets.get(name).map(Arc::clone) else {
+        let message = match name {
+            Some(name) => format!("no configuration is named `{name}`"),
+            None => "name the configuration: /v1/process/{name}".to_owned(),
+        };
+        return error(StatusCode::NOT_FOUND, &message);
+    };
+    if method != Method::POST {
+        return not_allowed("POST");
+    }
+    process(state, target, request)
+}
+
+/// The configuration name of a processing path: `None` for `/v1/process`,
+/// the name for `/v1/process/{name}`.
+fn process_name(path: &str) -> Option<Option<&str>> {
+    match path.strip_prefix("/v1/process")? {
+        "" => Some(None),
+        rest => rest
+            .strip_prefix('/')
+            .filter(|name| !name.is_empty() && !name.contains('/'))
+            .map(Some),
     }
 }
 
-fn process(state: Arc<State>, request: Request<Incoming>) -> Response<ResponseBody> {
+fn process(
+    state: Arc<State>,
+    target: Arc<Target>,
+    request: Request<Incoming>,
+) -> Response<ResponseBody> {
     let limit = state.limits.max_body_bytes;
     if request.body().size_hint().lower() > limit {
         let message = format!("the request body is larger than {limit} bytes");
@@ -126,12 +159,15 @@ fn process(state: Arc<State>, request: Request<Incoming>) -> Response<ResponseBo
             .insert(RETRY_AFTER, HeaderValue::from_static("1"));
         return response;
     };
-    let output = process::start(state, request.into_body(), permit);
+    let digest = target.digest.clone();
+    let output = process::start(state, target, request.into_body(), permit);
     let mut response = Response::new(output.boxed());
-    response.headers_mut().insert(
+    let headers = response.headers_mut();
+    headers.insert(
         CONTENT_TYPE,
         HeaderValue::from_static("application/x-ndjson"),
     );
+    headers.insert(CONFIG_DIGEST, digest);
     response
 }
 
