@@ -1,11 +1,26 @@
-//! Runs the examples of `docs/CONFIGURATION.md`. Every configuration block
-//! must build, and the responses after an input block must match.
+//! Runs the examples of the user documentation. Every configuration block
+//! must build, and the responses after an input block must match. Shell,
+//! Rust and plain text blocks are left alone.
 
 use moldette_config::{Config, Registry, Specs};
 use moldette_core::Response;
 use moldette_spec::json::JsonResponse;
 
-const DOCUMENT: &str = include_str!("../../../docs/CONFIGURATION.md");
+const DOCUMENTS: [(&str, &str); 4] = [
+    (
+        "docs/CONFIGURATION.md",
+        include_str!("../../../docs/CONFIGURATION.md"),
+    ),
+    ("README.md", include_str!("../../../README.md")),
+    (
+        "docs/TROUBLESHOOTING.md",
+        include_str!("../../../docs/TROUBLESHOOTING.md"),
+    ),
+    ("docs/SIDECAR.md", include_str!("../../../docs/SIDECAR.md")),
+];
+
+/// Blocks that show commands, code or messages rather than examples to run.
+const UNCHECKED: [&str; 3] = ["bash", "rust", "text"];
 
 struct Block<'d> {
     info: &'d str,
@@ -50,13 +65,22 @@ fn respond(specs: &Specs, raw: &str) -> serde_json::Value {
 }
 
 #[test]
-fn configuration_examples_build_and_respond_as_shown() {
+fn documented_examples_build_and_respond_as_shown() {
+    let mut outputs = 0;
+    for (path, document) in DOCUMENTS {
+        outputs += run_examples(path, document);
+    }
+    assert!(outputs > 0, "no example was run");
+}
+
+/// Runs the examples of one document and returns how many outputs matched.
+fn run_examples(path: &str, document: &str) -> usize {
     let registry = Registry::new();
     let mut specs: Option<Specs> = None;
     let mut input: Option<String> = None;
     let mut outputs = 0;
-    for block in blocks(DOCUMENT) {
-        let at = format!("docs/CONFIGURATION.md:{}", block.line);
+    for block in blocks(document) {
+        let at = format!("{path}:{}", block.line);
         match block.info {
             "yaml" | "json config" => {
                 let config = if block.info == "yaml" {
@@ -89,8 +113,9 @@ fn configuration_examples_build_and_respond_as_shown() {
                 assert_eq!(actual, expected, "{at}");
                 outputs += 1;
             }
+            other if UNCHECKED.contains(&other) => {}
             other => panic!("{at}: code block `{other}` is not checked"),
         }
     }
-    assert!(outputs > 0, "no example was run");
+    outputs
 }

@@ -53,7 +53,10 @@ LOWERING_TESTS = "--test lowering"
 # Files outside the crates whose examples a test target runs, with its name
 # filters; a key ending in `/` covers a directory.
 EXAMPLE_TESTS = {
+    "README.md": ("moldette-config", "--test docs", None),
     "docs/CONFIGURATION.md": ("moldette-config", "--test docs", None),
+    "docs/SIDECAR.md": ("moldette-config", "--test docs", None),
+    "docs/TROUBLESHOOTING.md": ("moldette-config", "--test docs", None),
     "examples/configs/": ("moldette-cli", "--test cli", {"examples::"}),
 }
 E2E_TESTS = "--test e2e"
