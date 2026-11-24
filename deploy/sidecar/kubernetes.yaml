@@ -53,10 +53,14 @@ spec:
       args:
         - --health-listen
         - 0.0.0.0:8096
+        - --metrics-listen
+        - 0.0.0.0:9090
         - /etc/moldette/config.yaml
       ports:
         - name: health
           containerPort: 8096
+        - name: metrics
+          containerPort: 9090
       startupProbe:
         httpGet:
           path: /readyz

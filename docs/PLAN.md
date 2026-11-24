@@ -102,7 +102,8 @@ Each layer milestone starts with its standalone API and ends with tests that
 use core types only. M0 to M5 make up v0.1 (tag `v0.1.0`); the v0.2
 improvements are tagged `v0.2.0`, the first public release `v0.3.0`, the
 CLI release `v0.4.0`, the configuration and parallel CLI release `v0.5.0`
-and the first users, input shapes and sidecar release `v0.6.0`.
+the first users, input shapes and sidecar release `v0.6.0` and the sidecar
+configurations and metrics release `v0.7.0`.
 
 ### M0 core
 
@@ -207,13 +208,19 @@ and the first users, input shapes and sidecar release `v0.6.0`.
 8. CLI binaries for Linux (x86_64, aarch64), macOS (x86_64, aarch64) and Windows (x86_64), attached to GitHub Releases from tags with checksums and artifact attestations
 9. release 0.6.0, confirmed by the maintainer first
 
-## After v0.6
+### v0.7 sidecar configurations and metrics
+
+1. named configurations in one sidecar, each at `POST /v1/process/<name>` with its own record framing; shared threads and limits; a changed configuration takes effect on restart; the configuration digest in a response header (#114, #122)
+2. sidecar metrics at `GET /metrics` on `--metrics-listen`, in the OpenMetrics text format: requests by configuration and status code, records by response status, request body bytes, request durations, requests in progress (#124)
+3. `CHANGELOG.md` updated; release 0.7.0, confirmed by the maintainer first
+
+## After v0.7
 
 | Item | Content |
 |---|---|
 | Parallel batch | library API, decided from the CLI measurements (#95) |
-| Ports | gRPC for the sidecar, JVM (UniFFI or WASM on Chicory), Python (PyO3), sandboxed WASM user ops |
-| Input | CSV header row names as field paths, which needs state across records (#103) |
+| Ports | gRPC for the sidecar, JVM (#116), Python (#115), sandboxed WASM user ops |
+| Input | CSV column names as field paths and skipping the header row (#125) |
 
 ## Workflow
 

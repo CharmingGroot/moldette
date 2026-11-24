@@ -139,6 +139,11 @@ Probes that cannot reach the loopback address, such as those of the kubelet,
 use `--health-listen <address>`, which answers only `GET /healthz` and
 `GET /readyz`.
 
+`--metrics-listen <address>` answers `GET /metrics` with metrics in the
+OpenMetrics text format, which Prometheus reads: requests by configuration and
+status code, records by response status, request body bytes, request durations
+and requests in progress. Without it, no metrics address is opened.
+
 `examples/configs` holds configurations for an nginx access log, syslog, a
 JSON API response and a CSV export, each with an input and the output of
 `moldette run`. The `examples/otlp` program sends the spans of a pipeline to
