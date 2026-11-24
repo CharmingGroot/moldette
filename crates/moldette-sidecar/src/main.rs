@@ -53,7 +53,8 @@ Endpoints:
   GET /readyz              200 once the configurations are loaded and the
                            address is open
 
-Options:
+Options (an option and its value may also be joined with `=`, as in
+`--threads=4`):
   --listen <address>      Address and port to listen on [default:
                           127.0.0.1:8095]
   --health-listen <address>
@@ -249,10 +250,23 @@ fn parse<T: FromStr>(value: Option<String>, default: T) -> Result<T, ExitCode> {
     }
 }
 
+/// Takes the first `<name> <value>` or `<name>=<value>` from `args`.
 fn take_option(args: &mut Vec<OsString>, name: &str) -> Result<Option<String>, ()> {
-    let Some(i) = args.iter().position(|arg| arg == name) else {
+    let joined = |arg: &OsString| {
+        arg.to_str()
+            .and_then(|arg| arg.strip_prefix(name)?.strip_prefix('='))
+            .map(str::to_owned)
+    };
+    let Some(i) = args
+        .iter()
+        .position(|arg| arg == name || joined(arg).is_some())
+    else {
         return Ok(None);
     };
+    if let Some(value) = joined(&args[i]) {
+        args.remove(i);
+        return Ok(Some(value));
+    }
     let value = args
         .get(i + 1)
         .and_then(|value| value.to_str())

@@ -485,6 +485,26 @@ fn a_record_start_without_a_name_is_for_the_multiline_configurations() {
 }
 
 #[test]
+fn options_may_join_their_values_with_an_equals_sign() {
+    let orders = format!("orders={CONFIG}");
+    let mut sidecar = Sidecar::start_with(&[
+        "--health-listen=127.0.0.1:0",
+        "--records=orders=json",
+        "--max-buffer-bytes=1048576",
+        &orders,
+    ]);
+    let health = sidecar.next_address("health checks on ");
+    let get = send(
+        &health,
+        b"GET /readyz HTTP/1.1\r\nHost: sidecar\r\nConnection: close\r\n\r\n",
+    );
+    assert_eq!(get.status, 200);
+    let (array, lines) = orders_json();
+    let reply = sidecar.post_to("/v1/process/orders", array.as_bytes());
+    assert_eq!(reply.text(), expected(&lines));
+}
+
+#[test]
 fn one_configuration_without_a_name_sends_its_digest() {
     let sidecar = Sidecar::start(&[]);
     let reply = sidecar.post(orders().as_bytes());

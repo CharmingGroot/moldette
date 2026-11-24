@@ -83,3 +83,15 @@ fn lines_ending_in_crlf_read_as_without_it() {
         moldette_with_input(&["run", &config], lf.as_bytes()).stdout
     );
 }
+
+#[test]
+fn an_option_may_join_its_value_with_an_equals_sign() {
+    let config = format!("{CONFIG_FIXTURES}/order_api.yaml");
+    let input = repeated_orders(2);
+    let separate = moldette_with_input(&["run", "--threads", "2", &config], input.as_bytes());
+    let joined = moldette_with_input(&["run", "--threads=2", &config], input.as_bytes());
+    assert!(joined.status.success(), "{}", stderr(&joined));
+    assert_eq!(joined.stdout, separate.stdout);
+    let empty = moldette_with_input(&["run", "--threads=", &config], input.as_bytes());
+    assert_eq!(empty.status.code(), Some(2));
+}
