@@ -18,6 +18,24 @@ moldette is at version 0.x.
 
 ## Unreleased
 
+## 0.7.0 (2026-11-24)
+
+### Added
+
+- `moldette-sidecar`: several configurations in one sidecar, given as
+  `<name>=<config>` and run at `POST /v1/process/<name>`, with `--records`
+  and `--record-start` for one configuration when prefixed by its name. The
+  configurations share the threads and the limits, and a changed
+  configuration takes effect on restart (#114, #122, #123).
+- `moldette-sidecar`: the `moldette-config-digest` response header, the
+  digest of the configuration that processed the request (#123).
+- `moldette-sidecar`: `--metrics-listen <address>` serves `GET /metrics` in
+  the OpenMetrics text format: requests by configuration and status code,
+  records by response status, request body bytes, request durations and
+  requests in progress (#124, #126).
+
+The other crates have no changes besides the version.
+
 ## 0.6.0 (2026-11-23)
 
 `moldette-spec` and `moldette-sidecar` are new on crates.io. `moldette-spec`
