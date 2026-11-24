@@ -307,6 +307,12 @@ impl TimeReader {
         if let (None, Some(year)) = (parsed.year(), self.year) {
             parsed.set_year(year)?;
         }
+        // A format that reads no time of day reads the start of the day.
+        if parsed.hour_24().is_none() && parsed.hour_12().is_none() {
+            parsed.set_hour_24(0)?;
+            parsed.set_minute(0)?;
+            parsed.set_second(0)?;
+        }
         match OffsetDateTime::try_from(parsed) {
             Ok(timestamp) => Some(timestamp),
             Err(TryFromParsed::InsufficientInformation) => PrimitiveDateTime::try_from(parsed)
