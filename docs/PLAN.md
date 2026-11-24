@@ -102,8 +102,9 @@ Each layer milestone starts with its standalone API and ends with tests that
 use core types only. M0 to M5 make up v0.1 (tag `v0.1.0`); the v0.2
 improvements are tagged `v0.2.0`, the first public release `v0.3.0`, the
 CLI release `v0.4.0`, the configuration and parallel CLI release `v0.5.0`
-the first users, input shapes and sidecar release `v0.6.0` and the sidecar
-configurations and metrics release `v0.7.0`.
+the first users, input shapes and sidecar release `v0.6.0`, the sidecar
+configurations and metrics release `v0.7.0` and the configuration source and
+user guide release `v0.8.0`.
 
 ### M0 core
 
@@ -214,13 +215,24 @@ configurations and metrics release `v0.7.0`.
 2. sidecar metrics at `GET /metrics` on `--metrics-listen`, in the OpenMetrics text format: requests by configuration and status code, records by response status, request body bytes, request durations, requests in progress (#124)
 3. `CHANGELOG.md` updated; release 0.7.0, confirmed by the maintainer first
 
-## After v0.7
+### v0.8 configuration source and user guide
+
+1. README rewritten; sidecar and troubleshooting documents (#138)
+2. date-only `timestamp` formats read the start of the day (#136)
+3. options joined with their values by `=` (#137)
+4. a Claude Code plugin marketplace and skill (#139)
+5. sidecar configurations read from an `http` URL at an interval, `POST /v1/check` (#135, #142)
+6. `CHANGELOG.md` and the plugin version updated; release 0.8.0, confirmed by the maintainer first
+
+## After v0.8
 
 | Item | Content |
 |---|---|
 | Parallel batch | library API, decided from the CLI measurements (#95) |
 | Ports | gRPC for the sidecar, JVM (#116), Python (#115), sandboxed WASM user ops |
 | Input | CSV column names as field paths and skipping the header row (#125) |
+| Sidecar | `https` configuration source (#140) |
+| Distribution | the plugin in Anthropic's plugin directory (#141) |
 
 ## Workflow
 

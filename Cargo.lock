@@ -763,7 +763,7 @@ dependencies = [
 
 [[package]]
 name = "moldette"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "moldette-config",
  "moldette-core",
@@ -777,7 +777,7 @@ dependencies = [
 
 [[package]]
 name = "moldette-bench-config"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "criterion",
  "moldette-bench-support",
@@ -786,7 +786,7 @@ dependencies = [
 
 [[package]]
 name = "moldette-bench-core"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "criterion",
  "moldette-bench-support",
@@ -795,7 +795,7 @@ dependencies = [
 
 [[package]]
 name = "moldette-bench-mapper"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "criterion",
  "moldette-bench-support",
@@ -804,7 +804,7 @@ dependencies = [
 
 [[package]]
 name = "moldette-bench-parser"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "criterion",
  "moldette-bench-support",
@@ -813,7 +813,7 @@ dependencies = [
 
 [[package]]
 name = "moldette-bench-pipeline"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "criterion",
  "moldette",
@@ -822,7 +822,7 @@ dependencies = [
 
 [[package]]
 name = "moldette-bench-resp"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "criterion",
  "moldette-bench-support",
@@ -832,14 +832,14 @@ dependencies = [
 
 [[package]]
 name = "moldette-bench-support"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "moldette-core",
 ]
 
 [[package]]
 name = "moldette-cli"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "flate2",
  "mimalloc",
@@ -850,7 +850,7 @@ dependencies = [
 
 [[package]]
 name = "moldette-config"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "moldette-core",
  "moldette-mapper",
@@ -865,11 +865,11 @@ dependencies = [
 
 [[package]]
 name = "moldette-core"
-version = "0.7.0"
+version = "0.8.0"
 
 [[package]]
 name = "moldette-mapper"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "moldette-core",
  "moldette-test-tracing",
@@ -880,7 +880,7 @@ dependencies = [
 
 [[package]]
 name = "moldette-otlp-example"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "moldette",
  "opentelemetry",
@@ -892,7 +892,7 @@ dependencies = [
 
 [[package]]
 name = "moldette-parser"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "moldette-core",
  "moldette-test-tracing",
@@ -904,7 +904,7 @@ dependencies = [
 
 [[package]]
 name = "moldette-resp"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "moldette-core",
  "moldette-test-tracing",
@@ -913,7 +913,7 @@ dependencies = [
 
 [[package]]
 name = "moldette-sidecar"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "http-body-util",
  "hyper",
@@ -928,7 +928,7 @@ dependencies = [
 
 [[package]]
 name = "moldette-spec"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "moldette-core",
  "serde_core",
@@ -938,7 +938,7 @@ dependencies = [
 
 [[package]]
 name = "moldette-test-tracing"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "tracing",
 ]

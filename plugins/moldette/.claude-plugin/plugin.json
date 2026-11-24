@@ -1,6 +1,6 @@
 {
   "name": "moldette",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Write, check, debug and deploy moldette configurations and the moldette sidecar",
   "author": {
     "name": "CharmingGroot",

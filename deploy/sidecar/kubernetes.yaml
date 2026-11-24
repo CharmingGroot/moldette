@@ -48,7 +48,7 @@ spec:
       type: RuntimeDefault
   initContainers:
     - name: moldette-sidecar
-      image: ghcr.io/charminggroot/moldette-sidecar:0.7.0
+      image: ghcr.io/charminggroot/moldette-sidecar:0.8.0
       restartPolicy: Always
       args:
         - --health-listen
