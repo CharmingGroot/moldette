@@ -3,10 +3,11 @@ use std::io;
 use std::net::SocketAddr;
 use std::pin::pin;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use http_body_util::combinators::BoxBody;
-use http_body_util::{BodyExt, Full};
+use http_body_util::{BodyExt, Full, Limited};
 use hyper::body::{Body, Bytes, Incoming};
 use hyper::header::{ALLOW, CONTENT_TYPE, HeaderName, HeaderValue, RETRY_AFTER};
 use hyper::server::conn::http1;
@@ -18,6 +19,7 @@ use serde_json::json;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::sleep;
 
+use crate::load::{self, Format};
 use crate::process;
 use crate::state::State;
 use crate::targets::Target;
@@ -64,7 +66,7 @@ pub(crate) async fn serve(
         let state = Arc::clone(&state);
         let service = service_fn(move |request| {
             let state = Arc::clone(&state);
-            async move { Ok::<_, Infallible>(route(state, request, endpoints)) }
+            async move { Ok::<_, Infallible>(route(state, request, endpoints).await) }
         });
         let connection = http1::Builder::new()
             .timer(TokioTimer::new())
@@ -106,7 +108,7 @@ async fn shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
 }
 
-fn route(
+async fn route(
     state: Arc<State>,
     request: Request<Incoming>,
     endpoints: Endpoints,
@@ -122,15 +124,17 @@ fn route(
     }
     match (path, endpoints) {
         ("/healthz", _) if method == Method::GET => return text(StatusCode::OK, "ok\n"),
-        ("/readyz", _) if method == Method::GET => return text(StatusCode::OK, "ready\n"),
+        ("/readyz", _) if method == Method::GET => return ready(&state),
         ("/healthz" | "/readyz", _) => return not_allowed("GET"),
         (_, Endpoints::Health) => return error(StatusCode::NOT_FOUND, "no such endpoint"),
+        ("/v1/check", _) if method == Method::POST => return check(&state, request).await,
+        ("/v1/check", _) => return not_allowed("POST"),
         _ => {}
     }
     let Some(name) = process_name(path) else {
         return error(StatusCode::NOT_FOUND, "no such endpoint");
     };
-    let Some(target) = state.targets.get(name).map(Arc::clone) else {
+    let Some(target) = state.targets.get(name) else {
         let message = match name {
             Some(name) => format!("no configuration is named `{name}`"),
             None => "name the configuration: /v1/process/{name}".to_owned(),
@@ -142,6 +146,64 @@ fn route(
         return not_allowed("POST");
     }
     process(state, target, request)
+}
+
+fn ready(state: &State) -> Response<ResponseBody> {
+    if state.ready.load(Ordering::Relaxed) {
+        text(StatusCode::OK, "ready\n")
+    } else {
+        text(StatusCode::SERVICE_UNAVAILABLE, "not ready\n")
+    }
+}
+
+/// Checks the configuration in the body without running it.
+async fn check(state: &State, request: Request<Incoming>) -> Response<ResponseBody> {
+    let format = match request.uri().query() {
+        None => Format::Yaml,
+        Some(query) => match query.strip_prefix("format=").and_then(Format::from_name) {
+            Some(format) => format,
+            None => {
+                return error(
+                    StatusCode::BAD_REQUEST,
+                    "the query must be format=yaml or format=json",
+                );
+            }
+        },
+    };
+    let limit = state.limits.max_body_bytes;
+    let body = match Limited::new(
+        request.into_body(),
+        usize::try_from(limit).unwrap_or(usize::MAX),
+    )
+    .collect()
+    .await
+    {
+        Ok(body) => body.to_bytes(),
+        Err(_) => {
+            let message = format!("the request body could not be read within {limit} bytes");
+            return error(StatusCode::PAYLOAD_TOO_LARGE, &message);
+        }
+    };
+    let Ok(text) = std::str::from_utf8(&body) else {
+        return error(StatusCode::BAD_REQUEST, "the configuration is not UTF-8");
+    };
+    let checked = tokio::task::block_in_place(|| load::check(text, format));
+    let (status, digest) = match &checked.built {
+        Some(built) => (StatusCode::OK, built.digest.to_str().ok()),
+        None => (StatusCode::UNPROCESSABLE_ENTITY, None),
+    };
+    let messages: Vec<_> = checked
+        .messages
+        .iter()
+        .map(|message| json!({ "severity": message.severity, "message": message.text }))
+        .collect();
+    let body = json!({ "digest": digest, "messages": messages }).to_string() + "\n";
+    let mut response = Response::new(Full::new(Bytes::from(body)).boxed());
+    *response.status_mut() = status;
+    response
+        .headers_mut()
+        .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    response
 }
 
 fn metrics(state: &State) -> Response<ResponseBody> {

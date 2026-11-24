@@ -10,6 +10,10 @@ use moldette::Response;
 
 /// The statuses of a response, in the order of [`RecordCounts`].
 const STATUSES: [&str; 4] = ["ok", "malformed", "missing_required", "emptied"];
+/// The status codes [`Metrics::request`] counts per configuration.
+const CODES: [u16; 4] = [200, 405, 413, 503];
+/// The results of reading the configuration source and of a build.
+const RESULTS: [&str; 2] = ["ok", "error"];
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
 struct RequestLabels {
@@ -28,9 +32,20 @@ struct ConfigLabels {
     config: String,
 }
 
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
+struct SourceLabels {
+    result: String,
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
+struct BuildLabels {
+    config: String,
+    result: String,
+}
+
 /// The metrics of the sidecar, served at `/metrics` (#124). The `config`
-/// label holds a configuration name, empty for one given without a name, so
-/// its values are the configurations given at start.
+/// label holds a configuration name, empty for one given without a name; a
+/// configuration removed from the configuration source loses its series.
 pub(crate) struct Metrics {
     registry: Registry,
     requests: Family<RequestLabels, Counter>,
@@ -38,6 +53,8 @@ pub(crate) struct Metrics {
     received: Family<ConfigLabels, Counter>,
     durations: Family<ConfigLabels, Histogram>,
     in_progress: Gauge,
+    source_requests: Family<SourceLabels, Counter>,
+    builds: Family<BuildLabels, Counter>,
 }
 
 impl Metrics {
@@ -50,6 +67,8 @@ impl Metrics {
             Histogram::new(exponential_buckets(0.005, 2.0, 14))
         });
         let in_progress = Gauge::default();
+        let source_requests = Family::<SourceLabels, Counter>::default();
+        let builds = Family::<BuildLabels, Counter>::default();
         let mut registry = Registry::with_prefix("moldette");
         registry.register(
             "requests",
@@ -78,6 +97,16 @@ impl Metrics {
             "Requests being processed",
             in_progress.clone(),
         );
+        registry.register(
+            "config_source_requests",
+            "Reads of the configuration source, by result",
+            source_requests.clone(),
+        );
+        registry.register(
+            "config_builds",
+            "Builds of configurations read from the configuration source, by configuration and result",
+            builds.clone(),
+        );
         Self {
             registry,
             requests,
@@ -85,6 +114,8 @@ impl Metrics {
             received,
             durations,
             in_progress,
+            source_requests,
+            builds,
         }
     }
 
@@ -115,6 +146,51 @@ impl Metrics {
                 code: code.to_string(),
             })
             .inc();
+    }
+
+    /// Counts a read of the configuration source: `ok`, `not_modified` or
+    /// `error`.
+    pub(crate) fn source_request(&self, result: &str) {
+        self.source_requests
+            .get_or_create(&SourceLabels {
+                result: result.to_owned(),
+            })
+            .inc();
+    }
+
+    /// Counts a build of a configuration read from the source.
+    pub(crate) fn build(&self, config: &str, ok: bool) {
+        self.builds
+            .get_or_create(&BuildLabels {
+                config: config.to_owned(),
+                result: (if ok { "ok" } else { "error" }).to_owned(),
+            })
+            .inc();
+    }
+
+    /// Removes the series of a configuration.
+    pub(crate) fn remove(&self, config: &str) {
+        let name = || config.to_owned();
+        for status in STATUSES {
+            self.records.remove(&RecordLabels {
+                config: name(),
+                status: status.to_owned(),
+            });
+        }
+        for code in CODES {
+            self.requests.remove(&RequestLabels {
+                config: name(),
+                code: code.to_string(),
+            });
+        }
+        for result in RESULTS {
+            self.builds.remove(&BuildLabels {
+                config: name(),
+                result: result.to_owned(),
+            });
+        }
+        self.received.remove(&ConfigLabels { config: name() });
+        self.durations.remove(&ConfigLabels { config: name() });
     }
 
     pub(crate) fn in_progress(&self) -> &Gauge {
@@ -186,5 +262,25 @@ mod tests {
             assert!(text.lines().any(|l| l == line), "{line} in\n{text}");
         }
         assert!(text.ends_with("# EOF\n"));
+    }
+
+    #[test]
+    fn a_removed_configuration_loses_its_series() {
+        let metrics = Metrics::new();
+        for name in ["orders", "access"] {
+            let config = metrics.config(name);
+            metrics.request(&config, 200);
+            metrics.build(name, true);
+            metrics.build(name, false);
+        }
+        metrics.remove("orders");
+        let text = metrics.text();
+        assert!(!text.contains("config=\"orders\""), "{text}");
+        for line in [
+            "moldette_requests_total{config=\"access\",code=\"200\"} 1",
+            "moldette_config_builds_total{config=\"access\",result=\"error\"} 1",
+        ] {
+            assert!(text.lines().any(|l| l == line), "{line} in\n{text}");
+        }
     }
 }

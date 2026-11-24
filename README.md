@@ -101,9 +101,10 @@ joins lines into records, and `.gz` files are decompressed.
 
 **`moldette-sidecar`** runs configurations next to an application, in the same
 pod or host. The application posts records over HTTP and reads the responses as
-they are produced. One sidecar can run several named configurations, serves
-probes and Prometheus metrics, and comes as a container image with a
-Kubernetes example. See `docs/SIDECAR.md`.
+they are produced. One sidecar can run several named configurations, read
+them from an HTTP URL as they change, serves probes and Prometheus metrics,
+and comes as a container image with a Kubernetes example. See
+`docs/SIDECAR.md`.
 
 **The `moldette` crate** gives the same pipeline to Rust programs. With `yaml`
 holding a configuration and `raw` one record:
@@ -146,8 +147,8 @@ feature.
   examples that the tests run.
 - `docs/TROUBLESHOOTING.md`: response statuses, finding why a field is empty,
   and the messages of `moldette check`.
-- `docs/SIDECAR.md`: running the sidecar, several configurations, limits,
-  metrics and Kubernetes.
+- `docs/SIDECAR.md`: running the sidecar, several configurations,
+  configurations read from a URL, limits, metrics and Kubernetes.
 - `examples/configs`: configurations for an nginx access log, syslog, a JSON
   API response and a CSV export, each with an input and its output.
 - `examples/otlp`: sending the spans of a pipeline to an OpenTelemetry
