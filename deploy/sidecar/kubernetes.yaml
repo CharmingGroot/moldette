@@ -4,7 +4,8 @@
 # `restartPolicy: Always`, Kubernetes 1.29 or later), so the application
 # starts once the startup probe passes and the sidecar stops after it. Records
 # are sent to 127.0.0.1:8095, which is not reachable from outside the pod;
-# the probes use the separate health address.
+# the probes use the separate health address. A changed ConfigMap takes
+# effect when the pod restarts.
 #
 #   kubectl apply -f deploy/sidecar/kubernetes.yaml
 #   kubectl logs orders -c app

@@ -25,6 +25,7 @@ pub(crate) struct Batch {
 }
 
 pub(crate) struct Job {
+    pub(crate) pipeline: Arc<Pipeline>,
     pub(crate) batch: Batch,
     pub(crate) permit: OwnedSemaphorePermit,
     pub(crate) budget: Arc<Budget>,
@@ -61,13 +62,12 @@ pub(crate) struct Pool {
 }
 
 impl Pool {
-    pub(crate) fn new(pipeline: Pipeline, threads: NonZeroUsize) -> Self {
+    pub(crate) fn new(threads: NonZeroUsize) -> Self {
         let (sender, receiver) = channel::<Job>();
         let receiver = Arc::new(Mutex::new(receiver));
         for _ in 0..threads.get() {
             let receiver = Arc::clone(&receiver);
-            let pipeline = pipeline.clone();
-            thread::spawn(move || work(&pipeline, &receiver));
+            thread::spawn(move || work(&receiver));
         }
         Self { sender }
     }
@@ -77,13 +77,14 @@ impl Pool {
     }
 }
 
-fn work(pipeline: &Pipeline, receiver: &Mutex<Receiver<Job>>) {
+fn work(receiver: &Mutex<Receiver<Job>>) {
     loop {
         let job = match receiver.lock() {
             Ok(receiver) => receiver.recv(),
             Err(_) => return,
         };
         let Ok(Job {
+            pipeline,
             batch,
             permit,
             budget,
@@ -92,7 +93,7 @@ fn work(pipeline: &Pipeline, receiver: &Mutex<Receiver<Job>>) {
         else {
             return;
         };
-        let (output, error) = process(pipeline, &batch);
+        let (output, error) = process(&pipeline, &batch);
         budget.hold(output.len());
         budget.release(batch.len());
         let _ = results.send(Message::Processed(Processed {
@@ -259,7 +260,7 @@ mod tests {
         Pipeline::new(parser, mapper, RespSpec::builder(schema).build())
     }
 
-    fn run(pool: &Pool, records: &[&str]) -> Processed {
+    fn run(pool: &Pool, pipeline: &Arc<Pipeline>, records: &[&str]) -> Processed {
         let mut batcher = Batcher::new();
         for record in records {
             batcher.add(record);
@@ -269,6 +270,7 @@ mod tests {
         for batch in batcher.take_full() {
             assert!(
                 pool.submit(Job {
+                    pipeline: Arc::clone(pipeline),
                     batch,
                     permit: Arc::new(Semaphore::new(1))
                         .try_acquire_owned()
@@ -288,8 +290,13 @@ mod tests {
 
     #[test]
     fn a_panicking_record_ends_its_batch_and_the_worker_goes_on() {
-        let pool = Pool::new(panicking_pipeline(), NonZeroUsize::MIN);
-        let failed = run(&pool, &[r#"{"v":"a"}"#, r#"{"v":"boom"}"#, r#"{"v":"c"}"#]);
+        let pool = Pool::new(NonZeroUsize::MIN);
+        let pipeline = Arc::new(panicking_pipeline());
+        let failed = run(
+            &pool,
+            &pipeline,
+            &[r#"{"v":"a"}"#, r#"{"v":"boom"}"#, r#"{"v":"c"}"#],
+        );
         let error = failed.error.expect("an error");
         assert_eq!(error.record, 2);
         assert!(
@@ -301,7 +308,7 @@ mod tests {
             String::from_utf8(failed.output).expect("UTF-8"),
             "{\"status\":\"ok\",\"fields\":{\"v\":\"a\"},\"emptied\":[]}\n"
         );
-        let next = run(&pool, &[r#"{"v":"d"}"#]);
+        let next = run(&pool, &pipeline, &[r#"{"v":"d"}"#]);
         assert!(next.error.is_none());
     }
 
