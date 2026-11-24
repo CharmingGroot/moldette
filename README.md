@@ -128,6 +128,7 @@ or check required fields of records produced elsewhere.
 | the library | `cargo add moldette` |
 | the command | `cargo install moldette-cli`, or a binary from a GitHub Release (Linux x86_64 and aarch64, macOS x86_64 and aarch64, Windows x86_64) |
 | the sidecar | `cargo install moldette-sidecar`, or the image `ghcr.io/charminggroot/moldette-sidecar` (`linux/amd64`, `linux/arm64`) |
+| a Claude Code skill | `/plugin marketplace add CharmingGroot/moldette`, then `/plugin install moldette@moldette` |
 
 Release binaries come with a `SHA256SUMS` file, and binaries and images carry
 build provenance attestations:
@@ -151,6 +152,8 @@ feature.
   API response and a CSV export, each with an input and its output.
 - `examples/otlp`: sending the spans of a pipeline to an OpenTelemetry
   collector.
+- `plugins/moldette`: a Claude Code skill that helps write, check and deploy
+  configurations, built on the documents above.
 - `CHANGELOG.md`: changes per release, and the compatibility rule.
 
 ## Crates

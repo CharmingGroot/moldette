@@ -136,6 +136,8 @@ class PlanTest(unittest.TestCase):
     def test_configuration_document_runs_its_examples(self):
         self.assertEqual(scoped("docs/CONFIGURATION.md"), [entry(CONFIG, "edge", "--test docs")])
         self.assertEqual(scoped("README.md", "docs/SIDECAR.md"), [entry(CONFIG, "edge", "--test docs")])
+        self.assertEqual(scoped("plugins/moldette/skills/moldette/SKILL.md"),
+                         [entry(CONFIG, "edge", "--test docs")])
         self.assertIn(entry(CONFIG, "full"), scoped("docs/CONFIGURATION.md", "crates/moldette-config/src/model.rs"))
 
     def test_configuration_examples_run_their_cli_tests(self):

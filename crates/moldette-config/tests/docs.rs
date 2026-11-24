@@ -6,7 +6,7 @@ use moldette_config::{Config, Registry, Specs};
 use moldette_core::Response;
 use moldette_spec::json::JsonResponse;
 
-const DOCUMENTS: [(&str, &str); 4] = [
+const DOCUMENTS: [(&str, &str); 5] = [
     (
         "docs/CONFIGURATION.md",
         include_str!("../../../docs/CONFIGURATION.md"),
@@ -17,6 +17,26 @@ const DOCUMENTS: [(&str, &str); 4] = [
         include_str!("../../../docs/TROUBLESHOOTING.md"),
     ),
     ("docs/SIDECAR.md", include_str!("../../../docs/SIDECAR.md")),
+    (
+        "plugins/moldette/skills/moldette/SKILL.md",
+        include_str!("../../../plugins/moldette/skills/moldette/SKILL.md"),
+    ),
+];
+
+/// The references of the skill, copies of the documents they name.
+const SKILL_REFERENCES: [(&str, &str); 3] = [
+    (
+        include_str!("../../../docs/CONFIGURATION.md"),
+        include_str!("../../../plugins/moldette/skills/moldette/references/configuration.md"),
+    ),
+    (
+        include_str!("../../../docs/TROUBLESHOOTING.md"),
+        include_str!("../../../plugins/moldette/skills/moldette/references/troubleshooting.md"),
+    ),
+    (
+        include_str!("../../../docs/SIDECAR.md"),
+        include_str!("../../../plugins/moldette/skills/moldette/references/sidecar.md"),
+    ),
 ];
 
 /// Blocks that show commands, code or messages rather than examples to run.
@@ -118,4 +138,11 @@ fn run_examples(path: &str, document: &str) -> usize {
         }
     }
     outputs
+}
+
+#[test]
+fn skill_references_are_copies_of_the_documents() {
+    for (index, (document, copy)) in SKILL_REFERENCES.iter().enumerate() {
+        assert_eq!(copy, document, "reference {index}: copy the document again");
+    }
 }
