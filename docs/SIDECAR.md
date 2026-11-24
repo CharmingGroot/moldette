@@ -183,4 +183,4 @@ effect when the pod restarts.
 
 Images built from release tags carry a build provenance attestation:
 
-    gh attestation verify oci://ghcr.io/charminggroot/moldette-sidecar:0.7.0 -R CharmingGroot/moldette
+    gh attestation verify oci://ghcr.io/charminggroot/moldette-sidecar:0.8.0 -R CharmingGroot/moldette

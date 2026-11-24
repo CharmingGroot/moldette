@@ -18,6 +18,40 @@ moldette is at version 0.x.
 
 ## Unreleased
 
+## 0.8.0 (2026-11-24)
+
+### Added
+
+- `moldette-sidecar`: `--config-source <url>` reads named configurations from
+  an `http` URL every `--config-poll` seconds (5 by default), with
+  `If-None-Match`; a changed configuration is built and replaces the one of its
+  name, one that fails to build keeps the previous one, one no longer listed
+  is removed, and configurations given as files are not replaced. `/readyz`
+  answers 503 until the list is first read, and `--config-source-max-bytes`
+  limits the list (#135, #142, #143).
+- `moldette-sidecar`: `POST /v1/check` checks a configuration without running
+  it (#143).
+- `moldette-sidecar`: the metrics `moldette_config_source_requests_total` and
+  `moldette_config_builds_total`; the series of a removed configuration are
+  removed (#143).
+- A Claude Code plugin marketplace at the repository root, with a skill that
+  writes, checks and deploys configurations (#139).
+
+### Changed
+
+- `moldette-mapper`: a `timestamp` format that reads no time of day reads the
+  start of the day, so `[year]-[month]-[day]` gives `2026-11-18T00:00:00Z`
+  for `2026-11-18` instead of no value (#136).
+
+### Fixed
+
+- `moldette-cli`, `moldette-sidecar`: an option and its value may be joined
+  with `=`, as in `--threads=4`, which was refused before (#137).
+
+The README was rewritten, and the sidecar and troubleshooting documents
+moved to `docs/SIDECAR.md` and `docs/TROUBLESHOOTING.md` (#138). The other
+crates have no changes besides the version.
+
 ## 0.7.0 (2026-11-24)
 
 ### Added

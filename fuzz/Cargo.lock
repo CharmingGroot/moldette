@@ -174,7 +174,7 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "moldette"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "moldette-config",
  "moldette-core",
@@ -186,7 +186,7 @@ dependencies = [
 
 [[package]]
 name = "moldette-config"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "moldette-core",
  "moldette-mapper",
@@ -200,7 +200,7 @@ dependencies = [
 
 [[package]]
 name = "moldette-core"
-version = "0.7.0"
+version = "0.8.0"
 
 [[package]]
 name = "moldette-fuzz"
@@ -212,7 +212,7 @@ dependencies = [
 
 [[package]]
 name = "moldette-mapper"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "moldette-core",
  "regex",
@@ -221,7 +221,7 @@ dependencies = [
 
 [[package]]
 name = "moldette-parser"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "moldette-core",
  "regex",
@@ -231,7 +231,7 @@ dependencies = [
 
 [[package]]
 name = "moldette-resp"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "moldette-core",
 ]

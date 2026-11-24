@@ -134,7 +134,7 @@ or check required fields of records produced elsewhere.
 Release binaries come with a `SHA256SUMS` file, and binaries and images carry
 build provenance attestations:
 
-    gh attestation verify moldette-cli-0.7.0-x86_64-unknown-linux-musl.tar.gz -R CharmingGroot/moldette
+    gh attestation verify moldette-cli-0.8.0-x86_64-unknown-linux-musl.tar.gz -R CharmingGroot/moldette
 
 The default `config` feature of the `moldette` crate turns on every layer. To
 use one layer without configuration files, depend on its crate, such as
