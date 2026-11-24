@@ -1,69 +1,112 @@
 # moldette
 
-moldette is a Rust library that turns one raw record into one record of a
-declared output schema. It parses the record into named fields, maps those
-fields onto the schema, and returns the result, or the reason it failed, as a
-value.
+moldette turns raw records into records of the schema you declare. You
+describe, in one YAML or JSON file, how to read a record (JSON, CSV and other
+delimited text, log lines read with a regular expression, `key=value` pairs),
+how to fill each output field and which fields are required. moldette checks
+that file once, then processes each record on its own and tells you, for every
+record, whether it fits the schema and why not.
 
 It handles one record at a time. Fetching data, storage, deduplication,
-enrichment that needs an external lookup, and anything spanning more than one
-record (aggregation, joins) are left to the caller.
+lookups against external data and anything spanning more than one record
+(aggregation, joins) are left to the caller.
+
+## Quick start
+
+Install the `moldette` command, from the binaries attached to each
+[GitHub Release](https://github.com/CharmingGroot/moldette/releases) or with
+Cargo:
+
+```bash
+cargo install moldette-cli
+```
+
+Write a configuration, `order.yaml`. It declares the output schema, reads four
+fields from each JSON record, and fills the schema fields of the same name:
+
+```yaml
+schemas:
+  - name: order
+    version: 1
+    fields:
+      - {name: id, type: string, required: true}
+      - {name: status, type: string}
+      - {name: total, type: float, required: true}
+      - {name: created_at, type: timestamp, required: true}
+
+parser:
+  format: json
+  fields:
+    id: /id
+    status: /status
+    total: /total
+    created_at: /created_at
+
+mapper:
+  schema: {name: order, version: 1}
+
+resp:
+  schema: {name: order, version: 1}
+```
+
+Check it, then run it over records, one per line:
+
+```bash
+moldette check order.yaml
+moldette run order.yaml orders.ndjson
+```
+
+```text input
+{"id":"A-1","status":"paid","total":25.5,"created_at":"2026-11-18T09:30:00Z"}
+{"id":"A-2","total":"n/a","created_at":"2026-11-18T10:00:00+09:00"}
+not json
+```
+
+```json output
+{"status":"ok","fields":{"id":"A-1","status":"paid","total":25.5,"created_at":"2026-11-18T09:30:00Z"},"emptied":[]}
+{"status":"missing_required","fields":["total"]}
+{"status":"malformed","reason":"expected ident at line 1 column 2"}
+```
+
+The second record's `total` is not a number, so the required field has no
+value; the third is not JSON. `moldette explain order.yaml orders.ndjson`
+shows, for each field, what was read and how it was converted.
 
 ## How it works
 
-A record passes through three layers:
+A record passes through three layers, all described by the configuration:
 
-- parser: reads one raw record (JSON, delimited text such as CSV, a regular
-  expression, or key=value pairs) into named text fields. A field whose value
-  is itself in one of these formats can be parsed in turn, such as a JSON body
-  after a delimited header.
-- mapper: fills each field of the output schema from those fields, with
-  fallbacks, constants, a small set of operations (trim, split, extract,
-  lookup, timestamp parsing) and coercion to string, int, float, bool,
-  timestamp or IP address. For any record it can explain which source and
-  which steps produced each output field.
-- resp: checks the mapped record against the schema. Each record ends with
-  one status: `Ok`, `Malformed` (the parser could not read it),
-  `MissingRequired` or `Emptied` (strict mode).
+- **parser** reads the raw record into named text fields. A field that holds
+  text in another format, such as a JSON body after a delimited header, can be
+  parsed in turn.
+- **mapper** fills each field of the output schema from those fields, with
+  fallbacks, defaults, constants and a small set of operations (trim, split,
+  extract, lookup, timestamp parsing), then converts the text to string, int,
+  float, bool, timestamp or IP address.
+- **resp** checks the result against the schema and gives the record one
+  status: `ok`, `malformed`, `missing_required`, or `emptied` in strict mode.
 
-A configuration file in YAML or JSON describes all three layers; every key is
-described in `docs/CONFIGURATION.md`. It is checked once when it is built:
-unknown keys, references between layers and rule errors are reported before
-any record is processed. The built specs are immutable and can be shared
-across threads. The configuration also yields lineage: which input field each
-output field comes from.
+The configuration is checked when it is loaded: unknown keys, references
+between layers and rule errors are reported with their location before any
+record is processed. It has no expression language; custom parsers and
+operations are registered as Rust types. The configuration also yields
+lineage, which input field each output field comes from.
 
-Custom parsers and operations are registered as Rust types; the configuration
-has no expression language.
+## Three ways to use it
 
-Each layer is usable on its own. A program can parse records without mapping
-them, map data that was parsed elsewhere, or check required fields of records
-produced by another system.
+**The `moldette` command** checks a configuration and runs it over files or
+standard input, on every core while keeping the input order. `--records json`
+reads JSON values or the elements of a top-level array, `--records multiline`
+joins lines into records, and `.gz` files are decompressed.
 
-## Crates
+**`moldette-sidecar`** runs configurations next to an application, in the same
+pod or host. The application posts records over HTTP and reads the responses as
+they are produced. One sidecar can run several named configurations, serves
+probes and Prometheus metrics, and comes as a container image with a
+Kubernetes example. See `docs/SIDECAR.md`.
 
-- `moldette`: the pipeline, with each layer selected by a feature of the same
-  name. The `config` feature is on by default and turns on the other three.
-- `moldette-config`: configuration files, cross-layer checks, lineage.
-- `moldette-parser`, `moldette-mapper`, `moldette-resp`: one layer each.
-- `moldette-core`: the types the layers exchange.
-- `moldette-cli`: the `moldette` command, which checks a configuration file
-  and runs it over records.
-- `moldette-sidecar`: an HTTP server that runs one configuration over records
-  streamed to it, for an application in the same pod.
-- `moldette-spec`: output formats of responses. The `json` feature writes a
-  response as the command prints it, through `serde`.
-
-Of the moldette crates, each layer crate depends only on `moldette-core`. No
-library crate performs I/O or keeps global state, and each builds for
-`wasm32-unknown-unknown`. With the
-`tracing` feature, the layers emit `tracing` spans and events; exporting them
-is left to the caller.
-
-## Usage
-
-With `yaml` holding a configuration and `raw` one record, inside a function
-that returns a `Result`:
+**The `moldette` crate** gives the same pipeline to Rust programs. With `yaml`
+holding a configuration and `raw` one record:
 
 ```rust
 use moldette::Pipeline;
@@ -74,109 +117,58 @@ let pipeline = Pipeline::from_specs(&specs)?;
 let response = pipeline.process(raw);
 ```
 
-The same configuration can be checked and run from the command line:
-
-    moldette check order.yaml
-    moldette run order.yaml orders.ndjson
-    moldette explain order.yaml orders.ndjson
-
-`check` reports what the configuration gets wrong and prints its lineage as
-JSON. `run` reads records from a file or standard input and prints one JSON
-response per line; `explain` adds how each field was filled. Both process
-records on every available core, or on `--threads <n>`, and keep the input
-order. Only built-in formats and operations are available from the command
-line.
-
-Records are one per line by default. `--records json` reads one record per
-JSON value, or per element of a top-level array, and `--records multiline
---record-start <regex>` joins each line that does not match the pattern to the
-record before it. Input files ending in `.gz` are decompressed.
-
-    moldette run --records json order.yaml orders.json
-    moldette run --records multiline --record-start '^\d{4}-' app.yaml app.log.gz
-
-The `framing` feature of the `moldette` crate provides the same record
-splitting to programs, without I/O.
-
-`moldette-sidecar` runs one configuration for an application in the same pod
-or host. It listens on `127.0.0.1:8095` by default, takes the record options
-above, and streams one response per line, in input order, as the request body
-arrives:
-
-    moldette-sidecar --records json order.yaml
-    curl --data-binary @orders.json http://127.0.0.1:8095/v1/process
-
-Several configurations can run in one sidecar, each under a name and at its
-own path. `--records` and `--record-start` without a name apply to every
-configuration:
-
-    moldette-sidecar --records orders=json orders=order.yaml access=access.yaml
-    curl --data-binary @orders.json http://127.0.0.1:8095/v1/process/orders
-
-The configurations share the threads and the limits below, so a burst of
-requests for one of them slows the others; a configuration that must not be
-affected runs in a sidecar of its own. A changed configuration takes effect
-when the sidecar restarts. Each response names its configuration by digest in
-the `moldette-config-digest` header.
-
-When the body cannot be read to the end, for example when a record is not
-valid UTF-8, the responses before it are followed by a line such as
-`{"error":{"message":"not valid UTF-8","record":2}}`. Request size, record
-size, time per request and requests at once are limited, and `GET /healthz`
-and `GET /readyz` answer probes.
-
-Each request holds at most `--max-buffer-bytes` (16 MiB by default) of
-records being processed and responses the client has not read, plus the
-batches being processed at that moment. Once it holds that much, the sidecar
-stops reading the body until the client reads more of the response. A client
-that reads the response only after sending the whole body is therefore served
-only while the responses fit in that limit; past it, the request ends at the
-time limit. Such a request holds about the limit plus 7 MiB in the process and
-up to about 7 MiB more in kernel socket buffers, so with the defaults 16 of
-them hold about 450 MiB.
-
-Probes that cannot reach the loopback address, such as those of the kubelet,
-use `--health-listen <address>`, which answers only `GET /healthz` and
-`GET /readyz`.
-
-`--metrics-listen <address>` answers `GET /metrics` with metrics in the
-OpenMetrics text format, which Prometheus reads: requests by configuration and
-status code, records by response status, request body bytes, request durations
-and requests in progress. Without it, no metrics address is opened.
-
-`examples/configs` holds configurations for an nginx access log, syslog, a
-JSON API response and a CSV export, each with an input and the output of
-`moldette run`. The `examples/otlp` program sends the spans of a pipeline to
-an OpenTelemetry collector.
+The built pipeline is immutable and can be shared across threads. Each layer
+is also usable on its own: a program can parse records without mapping them,
+or check required fields of records produced elsewhere.
 
 ## Installation
 
-    cargo add moldette
+| What | How |
+|---|---|
+| the library | `cargo add moldette` |
+| the command | `cargo install moldette-cli`, or a binary from a GitHub Release (Linux x86_64 and aarch64, macOS x86_64 and aarch64, Windows x86_64) |
+| the sidecar | `cargo install moldette-sidecar`, or the image `ghcr.io/charminggroot/moldette-sidecar` (`linux/amd64`, `linux/arm64`) |
 
-For the command and the sidecar:
-
-    cargo install moldette-cli
-    cargo install moldette-sidecar
-
-From 0.6.0, each GitHub Release also carries the `moldette` command built for
-Linux (x86_64 and aarch64, statically linked), macOS (x86_64 and aarch64) and
-Windows (x86_64), with a `SHA256SUMS` file and build provenance attestations:
+Release binaries come with a `SHA256SUMS` file, and binaries and images carry
+build provenance attestations:
 
     gh attestation verify moldette-cli-0.7.0-x86_64-unknown-linux-musl.tar.gz -R CharmingGroot/moldette
 
-The sidecar image `ghcr.io/charminggroot/moldette-sidecar` runs on
-`linux/amd64` and `linux/arm64`. It holds only the static binary, runs as user
-65532 and needs no writable file system. Images built from release tags carry
-a build provenance attestation:
+The default `config` feature of the `moldette` crate turns on every layer. To
+use one layer without configuration files, depend on its crate, such as
+`moldette-parser`, or turn off the default features and select the layer
+feature.
 
-    gh attestation verify oci://ghcr.io/charminggroot/moldette-sidecar:0.7.0 -R CharmingGroot/moldette
+## Documentation
 
-`deploy/sidecar/kubernetes.yaml` runs the sidecar next to an application in a
-pod with a restricted security context.
+- `docs/CONFIGURATION.md`: every configuration key, format and operation, with
+  examples that the tests run.
+- `docs/TROUBLESHOOTING.md`: response statuses, finding why a field is empty,
+  and the messages of `moldette check`.
+- `docs/SIDECAR.md`: running the sidecar, several configurations, limits,
+  metrics and Kubernetes.
+- `examples/configs`: configurations for an nginx access log, syslog, a JSON
+  API response and a CSV export, each with an input and its output.
+- `examples/otlp`: sending the spans of a pipeline to an OpenTelemetry
+  collector.
+- `CHANGELOG.md`: changes per release, and the compatibility rule.
 
-The default `config` feature turns on every layer. To use one layer without
-configuration files, depend on its crate, such as `moldette-parser`, or turn
-off the default features and select the layer feature.
+## Crates
+
+| Crate | Content |
+|---|---|
+| `moldette` | the pipeline, with each layer selected by a feature of the same name; record framing |
+| `moldette-config` | configuration files, checks between sections, lineage |
+| `moldette-parser`, `moldette-mapper`, `moldette-resp` | one layer each |
+| `moldette-core` | the types the layers exchange |
+| `moldette-cli` | the `moldette` command |
+| `moldette-sidecar` | the HTTP sidecar |
+| `moldette-spec` | output formats of responses, through `serde` |
+
+Each layer crate depends only on `moldette-core`. No library crate performs
+I/O or keeps global state, and each builds for `wasm32-unknown-unknown`. With
+the `tracing` feature, the layers emit `tracing` spans and events; exporting
+them is left to the caller.
 
 ## Status
 

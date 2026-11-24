@@ -130,11 +130,12 @@ class PlanTest(unittest.TestCase):
         self.assertTrue(runs_deny(["Cargo.lock"]))
 
     def test_docs_only_change_runs_no_crate(self):
-        self.assertEqual(scoped("docs/PLAN.md", "README.md"), [])
+        self.assertEqual(scoped("docs/PLAN.md", "CONTRIBUTING.md"), [])
         self.assertFalse(runs_deny(["docs/PLAN.md"]))
 
     def test_configuration_document_runs_its_examples(self):
         self.assertEqual(scoped("docs/CONFIGURATION.md"), [entry(CONFIG, "edge", "--test docs")])
+        self.assertEqual(scoped("README.md", "docs/SIDECAR.md"), [entry(CONFIG, "edge", "--test docs")])
         self.assertIn(entry(CONFIG, "full"), scoped("docs/CONFIGURATION.md", "crates/moldette-config/src/model.rs"))
 
     def test_configuration_examples_run_their_cli_tests(self):
