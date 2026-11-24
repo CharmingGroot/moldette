@@ -34,9 +34,9 @@ Read it from left to right:
   Check the path in `parser.fields`, and whether the record has the field.
 - **A text, then an op with `output` null**: that op could not handle the
   text. Above, the `timestamp` format `[day]/[month]/[year] [hour]:[minute]`
-  does not match `2026-11-18 09:30`; add a format that does. A format must
-  read a time of day: a date alone, such as `2026-11-18`, does not become a
-  timestamp.
+  does not match `2026-11-18 09:30`; add a format that does. A format that
+  reads no time of day, such as `[year]-[month]-[day]`, reads the start of the
+  day.
 - **A text, ops that pass, then `value` null**: the text does not convert to
   the field type. Above, `12,5` is not a `float`. The conversions are strict:
   `int` refuses `1.0` and surrounding spaces, `bool` takes only `true` and

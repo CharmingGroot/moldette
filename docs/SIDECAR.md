@@ -80,7 +80,9 @@ effect when the sidecar restarts.
 | `--timeout <seconds>` | 30 | time for one request, from reading its body to writing the last response |
 | `--max-requests <n>` | 16 | requests processed at once; more are answered with 503 |
 
-SIGTERM stops accepting connections and waits for the requests in progress.
+An option and its value may also be joined with `=`, as in
+`--health-listen=0.0.0.0:8096`. SIGTERM stops accepting connections and waits
+for the requests in progress.
 
 ## Memory and slow clients
 
