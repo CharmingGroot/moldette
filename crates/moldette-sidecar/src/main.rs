@@ -3,6 +3,7 @@
 
 mod budget;
 mod load;
+mod metrics;
 mod pool;
 mod process;
 mod server;
@@ -25,6 +26,7 @@ use hyper::header::HeaderValue;
 use moldette::Pipeline;
 use moldette::framing::Framer;
 
+use metrics::{ConfigMetrics, Metrics};
 use state::{Limits, State};
 use targets::{Target, Targets};
 
@@ -58,6 +60,10 @@ Options:
                           A second address that answers only GET /healthz
                           and GET /readyz, for probes that cannot reach the
                           loopback address
+  --metrics-listen <address>
+                          An address that answers only GET /metrics with the
+                          metrics in the OpenMetrics text format; without it,
+                          no metrics address is opened
   --threads <n>           Threads that parse and map records [default: the
                           number of available cores]
   --records [<name>=]<how>
@@ -100,6 +106,7 @@ const IO_THREADS: usize = 2;
 struct Settings {
     listen: SocketAddr,
     health_listen: Option<SocketAddr>,
+    metrics_listen: Option<SocketAddr>,
     threads: NonZeroUsize,
     records: Vec<String>,
     record_starts: Vec<String>,
@@ -129,7 +136,9 @@ fn main() -> ExitCode {
         Ok(settings) => settings,
         Err(code) => return code,
     };
-    let targets = match config_args(&args).and_then(|configs| targets(configs, &settings)) {
+    let metrics = Metrics::new();
+    let targets = match config_args(&args).and_then(|configs| targets(configs, &settings, &metrics))
+    {
         Ok(targets) => targets,
         Err(code) => return code,
     };
@@ -162,8 +171,23 @@ fn main() -> ExitCode {
             },
             None => None,
         };
+        let metrics_listener = match settings.metrics_listen {
+            Some(address) => match tokio::net::TcpListener::bind(address).await {
+                Ok(listener) => Some(listener),
+                Err(err) => {
+                    eprintln!("error: {address}: {err}");
+                    return ExitCode::FAILURE;
+                }
+            },
+            None => None,
+        };
         let address = listener.local_addr().unwrap_or(settings.listen);
-        let state = Arc::new(State::new(settings.threads, targets, settings.limits));
+        let state = Arc::new(State::new(
+            settings.threads,
+            targets,
+            metrics,
+            settings.limits,
+        ));
         eprintln!(
             "moldette-sidecar {} listening on {address}",
             env!("CARGO_PKG_VERSION")
@@ -171,7 +195,13 @@ fn main() -> ExitCode {
         if let Some(Ok(address)) = health.as_ref().map(tokio::net::TcpListener::local_addr) {
             eprintln!("moldette-sidecar health checks on {address}");
         }
-        server::serve(listener, health, state).await;
+        if let Some(Ok(address)) = metrics_listener
+            .as_ref()
+            .map(tokio::net::TcpListener::local_addr)
+        {
+            eprintln!("moldette-sidecar metrics on {address}");
+        }
+        server::serve(listener, health, metrics_listener, state).await;
         eprintln!("moldette-sidecar stopped");
         ExitCode::SUCCESS
     })
@@ -183,6 +213,7 @@ fn settings(args: &mut Vec<OsString>) -> Result<Settings, ExitCode> {
     let mut option = |name| take_option(args, name).map_err(|()| usage_error());
     let listen = option("--listen")?;
     let health_listen = option("--health-listen")?;
+    let metrics_listen = option("--metrics-listen")?;
     let threads = option("--threads")?;
     let max_body_bytes = option("--max-body-bytes")?;
     let max_record_bytes = option("--max-record-bytes")?;
@@ -193,6 +224,9 @@ fn settings(args: &mut Vec<OsString>) -> Result<Settings, ExitCode> {
     Ok(Settings {
         listen: parse(listen, DEFAULT_LISTEN)?,
         health_listen: health_listen
+            .map(|address| address.parse().map_err(|_| usage_error()))
+            .transpose()?,
+        metrics_listen: metrics_listen
             .map(|address| address.parse().map_err(|_| usage_error()))
             .transpose()?,
         threads: parse(threads, available)?,
@@ -285,7 +319,11 @@ fn is_name(name: &str) -> bool {
 }
 
 /// Loads each configuration with its framing.
-fn targets(configs: Vec<ConfigArg>, settings: &Settings) -> Result<Targets, ExitCode> {
+fn targets(
+    configs: Vec<ConfigArg>,
+    settings: &Settings,
+    metrics: &Metrics,
+) -> Result<Targets, ExitCode> {
     let names: Vec<&str> = configs.iter().filter_map(|c| c.name.as_deref()).collect();
     let (records, default_records) = per_config("--records", &settings.records, &names, |value| {
         value.split_once('=')
@@ -311,7 +349,8 @@ fn targets(configs: Vec<ConfigArg>, settings: &Settings) -> Result<Targets, Exit
         };
         multiline |= how == Some("multiline");
         let framer = framer(how, start)?.max_record_len(settings.max_record_bytes);
-        let target = Arc::new(target(&config.path, framer)?);
+        let config_metrics = metrics.config(name.unwrap_or_default());
+        let target = Arc::new(target(&config.path, framer, config_metrics)?);
         match config.name {
             Some(name) => {
                 named.insert(name, target);
@@ -328,7 +367,7 @@ fn targets(configs: Vec<ConfigArg>, settings: &Settings) -> Result<Targets, Exit
     })
 }
 
-fn target(path: &Path, framer: Framer) -> Result<Target, ExitCode> {
+fn target(path: &Path, framer: Framer, metrics: ConfigMetrics) -> Result<Target, ExitCode> {
     let specs = load::specs(path)?;
     let fail = |message: &dyn std::fmt::Display| {
         eprintln!("error: {}: {message}", path.display());
@@ -340,6 +379,7 @@ fn target(path: &Path, framer: Framer) -> Result<Target, ExitCode> {
         pipeline: Arc::new(pipeline),
         framer,
         digest,
+        metrics,
     })
 }
 

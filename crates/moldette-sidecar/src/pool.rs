@@ -12,6 +12,8 @@ use tokio::sync::OwnedSemaphorePermit;
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::budget::Budget;
+use crate::metrics::RecordCounts;
+use crate::targets::Target;
 
 const BATCH_RECORDS: usize = 256;
 const BATCH_BYTES: usize = 1 << 20;
@@ -25,7 +27,7 @@ pub(crate) struct Batch {
 }
 
 pub(crate) struct Job {
-    pub(crate) pipeline: Arc<Pipeline>,
+    pub(crate) target: Arc<Target>,
     pub(crate) batch: Batch,
     pub(crate) permit: OwnedSemaphorePermit,
     pub(crate) budget: Arc<Budget>,
@@ -84,7 +86,7 @@ fn work(receiver: &Mutex<Receiver<Job>>) {
             Err(_) => return,
         };
         let Ok(Job {
-            pipeline,
+            target,
             batch,
             permit,
             budget,
@@ -93,7 +95,9 @@ fn work(receiver: &Mutex<Receiver<Job>>) {
         else {
             return;
         };
-        let (output, error) = process(&pipeline, &batch);
+        let mut counts = RecordCounts::default();
+        let (output, error) = process(&target.pipeline, &batch, &mut counts);
+        target.metrics.add_records(&counts);
         budget.hold(output.len());
         budget.release(batch.len());
         let _ = results.send(Message::Processed(Processed {
@@ -109,7 +113,11 @@ fn work(receiver: &Mutex<Receiver<Job>>) {
 /// Writes one response line per record. A record whose processing panics
 /// ends the batch with an error, and the worker thread goes on with the next
 /// batch.
-fn process(pipeline: &Pipeline, batch: &Batch) -> (Vec<u8>, Option<RecordError>) {
+fn process(
+    pipeline: &Pipeline,
+    batch: &Batch,
+    counts: &mut RecordCounts,
+) -> (Vec<u8>, Option<RecordError>) {
     let mut output = Vec::with_capacity(batch.text.len() * 2);
     let mut error = None;
     let mut start = 0;
@@ -118,7 +126,9 @@ fn process(pipeline: &Pipeline, batch: &Batch) -> (Vec<u8>, Option<RecordError>)
         start = end;
         let line_start = output.len();
         let written = panic::catch_unwind(AssertUnwindSafe(|| {
-            serde_json::to_writer(&mut output, &JsonResponse::new(&pipeline.process(raw)))
+            let response = pipeline.process(raw);
+            counts.count(&response);
+            serde_json::to_writer(&mut output, &JsonResponse::new(&response))
         }));
         let message = match written {
             Ok(Ok(())) => {
@@ -221,6 +231,8 @@ impl Batcher {
 mod tests {
     use std::borrow::Cow;
 
+    use hyper::header::HeaderValue;
+    use moldette::framing::Framer;
     use moldette::mapper::{MapperSpec, Op, Rule};
     use moldette::parser::{Format, ParserSpec};
     use moldette::resp::RespSpec;
@@ -229,6 +241,7 @@ mod tests {
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::*;
+    use crate::metrics::Metrics;
 
     #[derive(Debug)]
     struct PanicsOnBoom;
@@ -260,7 +273,7 @@ mod tests {
         Pipeline::new(parser, mapper, RespSpec::builder(schema).build())
     }
 
-    fn run(pool: &Pool, pipeline: &Arc<Pipeline>, records: &[&str]) -> Processed {
+    fn run(pool: &Pool, target: &Arc<Target>, records: &[&str]) -> Processed {
         let mut batcher = Batcher::new();
         for record in records {
             batcher.add(record);
@@ -270,7 +283,7 @@ mod tests {
         for batch in batcher.take_full() {
             assert!(
                 pool.submit(Job {
-                    pipeline: Arc::clone(pipeline),
+                    target: Arc::clone(target),
                     batch,
                     permit: Arc::new(Semaphore::new(1))
                         .try_acquire_owned()
@@ -291,10 +304,16 @@ mod tests {
     #[test]
     fn a_panicking_record_ends_its_batch_and_the_worker_goes_on() {
         let pool = Pool::new(NonZeroUsize::MIN);
-        let pipeline = Arc::new(panicking_pipeline());
+        let metrics = Metrics::new();
+        let target = Arc::new(Target {
+            pipeline: Arc::new(panicking_pipeline()),
+            framer: Framer::lines(),
+            digest: HeaderValue::from_static("sha256:test"),
+            metrics: metrics.config("t"),
+        });
         let failed = run(
             &pool,
-            &pipeline,
+            &target,
             &[r#"{"v":"a"}"#, r#"{"v":"boom"}"#, r#"{"v":"c"}"#],
         );
         let error = failed.error.expect("an error");
@@ -308,8 +327,10 @@ mod tests {
             String::from_utf8(failed.output).expect("UTF-8"),
             "{\"status\":\"ok\",\"fields\":{\"v\":\"a\"},\"emptied\":[]}\n"
         );
-        let next = run(&pool, &pipeline, &[r#"{"v":"d"}"#]);
+        let next = run(&pool, &target, &[r#"{"v":"d"}"#]);
         assert!(next.error.is_none());
+        let ok = "moldette_records_total{config=\"t\",status=\"ok\"} 2";
+        assert!(metrics.text().lines().any(|line| line == ok), "{ok}");
     }
 
     fn sizes(records: &[&str]) -> Vec<(usize, usize)> {

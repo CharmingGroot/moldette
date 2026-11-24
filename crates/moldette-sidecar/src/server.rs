@@ -23,6 +23,7 @@ use crate::state::State;
 use crate::targets::Target;
 
 const HEADER_TIMEOUT: Duration = Duration::from_secs(10);
+const OPENMETRICS: &str = "application/openmetrics-text; version=1.0.0; charset=utf-8";
 /// The digest of the configuration that processed a request (#122).
 const CONFIG_DIGEST: HeaderName = HeaderName::from_static("moldette-config-digest");
 const ACCEPT_RETRY: Duration = Duration::from_millis(100);
@@ -35,18 +36,25 @@ type ResponseBody = BoxBody<Bytes, Infallible>;
 enum Endpoints {
     All,
     Health,
+    Metrics,
 }
 
 /// Serves connections until SIGTERM or Ctrl-C, then waits for the requests in
 /// progress for up to the request time limit. `health`, when given, answers
-/// only the probe endpoints.
-pub(crate) async fn serve(listener: TcpListener, health: Option<TcpListener>, state: Arc<State>) {
+/// only the probe endpoints, and `metrics` only `GET /metrics`.
+pub(crate) async fn serve(
+    listener: TcpListener,
+    health: Option<TcpListener>,
+    metrics: Option<TcpListener>,
+    state: Arc<State>,
+) {
     let graceful = GracefulShutdown::new();
     let mut shutdown = pin!(shutdown_signal());
     loop {
         let (accepted, endpoints) = tokio::select! {
             accepted = listener.accept() => (accepted, Endpoints::All),
             accepted = accept(health.as_ref()) => (accepted, Endpoints::Health),
+            accepted = accept(metrics.as_ref()) => (accepted, Endpoints::Metrics),
             () = &mut shutdown => break,
         };
         let Ok((stream, _)) = accepted else {
@@ -69,6 +77,7 @@ pub(crate) async fn serve(listener: TcpListener, health: Option<TcpListener>, st
     }
     drop(listener);
     drop(health);
+    drop(metrics);
     tokio::select! {
         () = graceful.shutdown() => {}
         () = sleep(state.limits.timeout + SHUTDOWN_GRACE) => {}
@@ -104,6 +113,13 @@ fn route(
 ) -> Response<ResponseBody> {
     let method = request.method();
     let path = request.uri().path();
+    if let Endpoints::Metrics = endpoints {
+        return match path {
+            "/metrics" if method == Method::GET => metrics(&state),
+            "/metrics" => not_allowed("GET"),
+            _ => error(StatusCode::NOT_FOUND, "no such endpoint"),
+        };
+    }
     match (path, endpoints) {
         ("/healthz", _) if method == Method::GET => return text(StatusCode::OK, "ok\n"),
         ("/readyz", _) if method == Method::GET => return text(StatusCode::OK, "ready\n"),
@@ -122,9 +138,18 @@ fn route(
         return error(StatusCode::NOT_FOUND, &message);
     };
     if method != Method::POST {
+        state.metrics.request(&target.metrics, 405);
         return not_allowed("POST");
     }
     process(state, target, request)
+}
+
+fn metrics(state: &State) -> Response<ResponseBody> {
+    let mut response = Response::new(Full::new(Bytes::from(state.metrics.text())).boxed());
+    response
+        .headers_mut()
+        .insert(CONTENT_TYPE, HeaderValue::from_static(OPENMETRICS));
+    response
 }
 
 /// The configuration name of a processing path: `None` for `/v1/process`,
@@ -146,10 +171,12 @@ fn process(
 ) -> Response<ResponseBody> {
     let limit = state.limits.max_body_bytes;
     if request.body().size_hint().lower() > limit {
+        state.metrics.request(&target.metrics, 413);
         let message = format!("the request body is larger than {limit} bytes");
         return error(StatusCode::PAYLOAD_TOO_LARGE, &message);
     }
     let Ok(permit) = Arc::clone(&state.requests).try_acquire_owned() else {
+        state.metrics.request(&target.metrics, 503);
         let mut response = error(
             StatusCode::SERVICE_UNAVAILABLE,
             "too many requests in progress",
@@ -159,6 +186,7 @@ fn process(
             .insert(RETRY_AFTER, HeaderValue::from_static("1"));
         return response;
     };
+    state.metrics.request(&target.metrics, 200);
     let digest = target.digest.clone();
     let output = process::start(state, target, request.into_body(), permit);
     let mut response = Response::new(output.boxed());

@@ -496,6 +496,71 @@ fn one_configuration_without_a_name_sends_its_digest() {
 }
 
 #[test]
+fn the_metrics_address_counts_requests_records_and_bytes() {
+    let named = format!("orders={CONFIG}");
+    let mut sidecar = Sidecar::start_with(&[
+        "--metrics-listen",
+        "127.0.0.1:0",
+        "--max-body-bytes",
+        "100000",
+        &named,
+    ]);
+    let metrics = sidecar.next_address("metrics on ");
+    let input = orders();
+    let reply = sidecar.post_to("/v1/process/orders", input.as_bytes());
+    assert_eq!(reply.status, 200);
+    let too_large = vec![b'{'; 200_000];
+    assert_eq!(
+        sidecar.post_to("/v1/process/orders", &too_large).status,
+        413
+    );
+    assert_eq!(sidecar.get("/v1/process/orders").status, 405);
+    assert_eq!(sidecar.post_to("/v1/process/ghost", b"{}").status, 404);
+    let mut statuses = std::collections::BTreeMap::new();
+    for line in reply.lines() {
+        let status = line["status"].as_str().expect("status").to_owned();
+        *statuses.entry(status).or_insert(0) += 1;
+    }
+    let scrape = send(
+        &metrics,
+        b"GET /metrics HTTP/1.1\r\nHost: sidecar\r\nConnection: close\r\n\r\n",
+    );
+    assert_eq!(scrape.status, 200);
+    assert!(
+        scrape
+            .header("content-type")
+            .is_some_and(|value| value.starts_with("application/openmetrics-text"))
+    );
+    let text = scrape.text();
+    let mut lines = vec![
+        "moldette_requests_total{config=\"orders\",code=\"200\"} 1".to_owned(),
+        "moldette_requests_total{config=\"orders\",code=\"413\"} 1".to_owned(),
+        "moldette_requests_total{config=\"orders\",code=\"405\"} 1".to_owned(),
+        format!(
+            "moldette_received_bytes_total{{config=\"orders\"}} {}",
+            input.len()
+        ),
+        "moldette_request_duration_seconds_count{config=\"orders\"} 1".to_owned(),
+        "moldette_requests_in_progress 0".to_owned(),
+    ];
+    for (status, count) in statuses {
+        lines.push(format!(
+            "moldette_records_total{{config=\"orders\",status=\"{status}\"}} {count}"
+        ));
+    }
+    for line in lines {
+        assert!(text.lines().any(|l| l == line), "{line} in\n{text}");
+    }
+    assert!(!text.contains("ghost"), "{text}");
+    let other = send(
+        &metrics,
+        b"GET /v1/process/orders HTTP/1.1\r\nHost: sidecar\r\nConnection: close\r\n\r\n",
+    );
+    assert_eq!(other.status, 404);
+    assert_eq!(sidecar.get("/metrics").status, 404);
+}
+
+#[test]
 fn unknown_paths_and_methods_are_refused() {
     let sidecar = Sidecar::start(&[]);
     assert_eq!(sidecar.get("/v1/explain").status, 404);

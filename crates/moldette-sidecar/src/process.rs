@@ -6,7 +6,6 @@ use std::task::{Context, Poll};
 
 use http_body_util::BodyExt;
 use hyper::body::{Body, Bytes, Frame, Incoming};
-use moldette::Pipeline;
 use serde_json::json;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
@@ -51,13 +50,24 @@ pub(crate) fn start(
     request: OwnedSemaphorePermit,
 ) -> Output {
     let (sender, receiver) = mpsc::unbounded_channel();
+    let started = Instant::now();
     let budget = Arc::new(Budget::new(state.limits.max_buffer_bytes));
     let output = Output {
         receiver,
         budget: Arc::clone(&budget),
     };
     tokio::spawn(async move {
-        run(state, target, body, Sink { sender, budget }).await;
+        state.metrics.in_progress().inc();
+        let sink = Sink { sender, budget };
+        run(Arc::clone(&state), Arc::clone(&target), body, &sink).await;
+        // Recorded before the response ends, so a client that has read it
+        // sees the request counted.
+        target
+            .metrics
+            .duration
+            .observe(started.elapsed().as_secs_f64());
+        state.metrics.in_progress().dec();
+        drop(sink);
         drop(request);
     });
     output
@@ -84,7 +94,7 @@ impl Sink {
     }
 }
 
-async fn run(state: Arc<State>, target: Arc<Target>, body: Incoming, sink: Sink) {
+async fn run(state: Arc<State>, target: Arc<Target>, body: Incoming, sink: &Sink) {
     let deadline = Instant::now() + state.limits.timeout;
     let (results, mut received) = mpsc::unbounded_channel();
     let reader = tokio::spawn(read(
@@ -95,7 +105,7 @@ async fn run(state: Arc<State>, target: Arc<Target>, body: Incoming, sink: Sink)
         results,
     ));
     let mut written = 0;
-    let finished = timeout_at(deadline, write_in_order(&mut received, &sink, &mut written)).await;
+    let finished = timeout_at(deadline, write_in_order(&mut received, sink, &mut written)).await;
     // The reader may be waiting for budget that a dropped response never frees.
     reader.abort();
     if finished.is_err() {
@@ -130,6 +140,7 @@ async fn read(
                     continue;
                 };
                 received += data.len() as u64;
+                target.metrics.received.inc_by(data.len() as u64);
                 if received > state.limits.max_body_bytes {
                     let limit = state.limits.max_body_bytes;
                     break Some((
@@ -146,7 +157,7 @@ async fn read(
         // A client may stream records slowly; what arrived is processed now.
         batcher.close();
         for batch in batcher.take_full() {
-            if !submit(&state, &target.pipeline, &permits, &budget, &results, batch).await {
+            if !submit(&state, &target, &permits, &budget, &results, batch).await {
                 return;
             }
         }
@@ -160,7 +171,7 @@ async fn read(
     });
     batcher.close();
     for batch in batcher.take_full() {
-        if !submit(&state, &target.pipeline, &permits, &budget, &results, batch).await {
+        if !submit(&state, &target, &permits, &budget, &results, batch).await {
             return;
         }
     }
@@ -172,7 +183,7 @@ async fn read(
 
 async fn submit(
     state: &State,
-    pipeline: &Arc<Pipeline>,
+    target: &Arc<Target>,
     permits: &Arc<Semaphore>,
     budget: &Arc<Budget>,
     results: &UnboundedSender<Message>,
@@ -183,7 +194,7 @@ async fn submit(
     };
     budget.hold(batch.len());
     state.pool.submit(Job {
-        pipeline: Arc::clone(pipeline),
+        target: Arc::clone(target),
         batch,
         permit,
         budget: Arc::clone(budget),
