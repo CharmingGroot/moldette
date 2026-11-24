@@ -1,0 +1,15 @@
+{
+  "name": "moldette",
+  "description": "Claude Code plugins for moldette, which turns raw records into records of a declared schema",
+  "owner": {
+    "name": "CharmingGroot",
+    "url": "https://github.com/CharmingGroot"
+  },
+  "plugins": [
+    {
+      "name": "moldette",
+      "source": "./plugins/moldette",
+      "description": "Write, check, debug and deploy moldette configurations and the moldette sidecar"
+    }
+  ]
+}

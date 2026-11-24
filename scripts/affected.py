@@ -58,6 +58,7 @@ EXAMPLE_TESTS = {
     "docs/SIDECAR.md": ("moldette-config", "--test docs", None),
     "docs/TROUBLESHOOTING.md": ("moldette-config", "--test docs", None),
     "examples/configs/": ("moldette-cli", "--test cli", {"examples::"}),
+    "plugins/moldette/": ("moldette-config", "--test docs", None),
 }
 E2E_TESTS = "--test e2e"
 ALLOCATION_TESTS = "--test allocations"

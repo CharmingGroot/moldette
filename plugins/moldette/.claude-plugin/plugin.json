@@ -1,0 +1,12 @@
+{
+  "name": "moldette",
+  "version": "0.7.0",
+  "description": "Write, check, debug and deploy moldette configurations and the moldette sidecar",
+  "author": {
+    "name": "CharmingGroot",
+    "url": "https://github.com/CharmingGroot"
+  },
+  "license": "Apache-2.0",
+  "repository": "https://github.com/CharmingGroot/moldette",
+  "keywords": ["moldette", "etl", "normalization", "schema", "logs"]
+}
