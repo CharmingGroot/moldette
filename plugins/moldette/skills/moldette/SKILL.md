@@ -66,7 +66,10 @@ emptying fields that looked fine on paper.
    take option names, paths and defaults from it or from
    `moldette-sidecar --help` rather than from other tools' conventions: the
    processing endpoints are `/v1/process` and `/v1/process/<name>`, and the
-   configurations are positional `<name>=<path>` arguments.
+   configurations are positional `<name>=<path>` arguments. From 0.8, a
+   sidecar can also read named configurations from an `http` URL with
+   `--config-source` and check one with `POST /v1/check`, for configurations
+   that change while it runs.
 
 Options take their value as the next argument (`--threads 4`). moldette 0.8
 also accepts `--threads=4`; moldette 0.7 does not, so a manifest written with
@@ -159,4 +162,4 @@ paths, read the copy here.
 - `references/troubleshooting.md`: response statuses, `moldette check`
   messages and how to fix them.
 - `references/sidecar.md`: running `moldette-sidecar`, several configurations,
-  limits, metrics and Kubernetes.
+  configurations read from a URL, limits, metrics and Kubernetes.

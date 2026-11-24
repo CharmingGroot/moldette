@@ -1,5 +1,6 @@
 use std::num::NonZeroUsize;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use tokio::sync::Semaphore;
@@ -22,6 +23,9 @@ pub(crate) struct State {
     pub(crate) metrics: Metrics,
     pub(crate) limits: Limits,
     pub(crate) requests: Arc<Semaphore>,
+    /// Whether `/readyz` answers 200: from the start, or once the
+    /// configuration source is first read.
+    pub(crate) ready: AtomicBool,
 }
 
 impl State {
@@ -30,6 +34,7 @@ impl State {
         targets: Targets,
         metrics: Metrics,
         limits: Limits,
+        ready: bool,
     ) -> Self {
         Self {
             pool: Pool::new(threads),
@@ -38,6 +43,7 @@ impl State {
             metrics,
             requests: Arc::new(Semaphore::new(limits.max_requests)),
             limits,
+            ready: AtomicBool::new(ready),
         }
     }
 }

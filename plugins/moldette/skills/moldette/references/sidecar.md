@@ -29,7 +29,8 @@ The container image `ghcr.io/charminggroot/moldette-sidecar` runs on
 | `POST /v1/process` | with one configuration given without a name: the responses, one JSON line per record |
 | `POST /v1/process/<name>` | the same with the configuration of that name |
 | `GET /healthz` | 200 while the process runs |
-| `GET /readyz` | 200 once the configurations are loaded and the address is open |
+| `POST /v1/check` | checks the configuration in the request body without running it |
+| `GET /readyz` | 200 once the configurations are loaded and the address is open; with `--config-source`, once the list has been read |
 | `GET /metrics` | only on the `--metrics-listen` address |
 
 Each processing response carries the digest of its configuration in the
@@ -61,8 +62,59 @@ configuration, and prefixed by a name to that configuration only:
 Each configuration is a separate object: changing or failing one does not touch
 the others. They share the process, the threads and the limits below, so a
 burst of requests for one of them slows the others; a configuration that must
-not be affected runs in a sidecar of its own. A changed configuration takes
-effect when the sidecar restarts.
+not be affected runs in a sidecar of its own. A changed configuration file
+takes effect when the sidecar restarts.
+
+## Configurations from a URL
+
+With `--config-source <url>`, the sidecar reads named configurations from an
+`http` URL every `--config-poll` seconds, 5 by default, so that a configuration
+changed in an application takes effect within seconds without a restart. The
+URL answers with a list:
+
+```text
+{
+  "configs": [
+    {"name": "orders", "format": "yaml", "records": "json", "body": "schemas:\n  - name: order\n..."},
+    {"name": "access", "format": "yaml", "body": "..."}
+  ]
+}
+```
+
+`name` is the name of the processing path, `format` is `yaml` or `json`, and
+`body` is the text of the configuration file. `records` and `record_start`
+take the values of the options of the same name, and records are one per line
+without them. Configuration files may be given as well:
+
+    moldette-sidecar --config-source http://config.app.svc/moldette access=access.yaml
+
+At each read:
+
+- A list sent with an `ETag` is asked for again with `If-None-Match`, and a 304
+  answer changes nothing.
+- An entry that changed is checked and built, and replaces the configuration
+  of its name. A request in progress ends with the configuration it started
+  with.
+- An entry that fails to build leaves the configuration of its name as it was,
+  and its messages are printed on standard error.
+- A name no longer listed is removed, and its paths answer 404.
+- A name given as a configuration file is not replaced or removed.
+- When the URL cannot be read, the sidecar goes on with the configurations it
+  has.
+
+`/readyz` answers 503 until the list has been read once. Only `http` URLs are
+read, so the URL should be inside the cluster or behind a service mesh that
+encrypts traffic.
+
+`POST /v1/check` checks a configuration as the sidecar would build it, without
+running it, so an application can refuse a configuration before listing it.
+The body is the configuration text, YAML or, with `?format=json`, JSON. The
+answer is 200 with the digest and the warnings, or 422 with the errors, here
+for a `delimited` parser given `separator` instead of `delimiter`:
+
+```text
+{"digest":null,"messages":[{"message":"parser: unknown key `separator` at line 3, column 3","severity":"error"}]}
+```
 
 ## Options
 
@@ -79,6 +131,9 @@ effect when the sidecar restarts.
 | `--max-buffer-bytes <n>` | 16777216 | bytes one request holds; see below |
 | `--timeout <seconds>` | 30 | time for one request, from reading its body to writing the last response |
 | `--max-requests <n>` | 16 | requests processed at once; more are answered with 503 |
+| `--config-source <url>` | none | an `http` URL that lists named configurations; see above |
+| `--config-poll <seconds>` | 5 | interval between reads of the configuration source |
+| `--config-source-max-bytes <n>` | 16777216 | largest list the configuration source may send |
 
 An option and its value may also be joined with `=`, as in
 `--health-listen=0.0.0.0:8096`. SIGTERM stops accepting connections and waits
@@ -110,9 +165,12 @@ format, which Prometheus reads. Without it, no metrics address is opened.
 | `moldette_received_bytes_total` | `config` | request body bytes read |
 | `moldette_request_duration_seconds` | `config` | time from the start of a request to its last response |
 | `moldette_requests_in_progress` | | requests being processed |
+| `moldette_config_source_requests_total` | `result` | reads of the configuration source: `ok`, `not_modified`, `error` |
+| `moldette_config_builds_total` | `config`, `result` | builds of configurations read from the source: `ok`, `error` |
 
 `config` is the configuration name, empty for one given without a name.
-Requests for a name that is not configured are not counted.
+Requests for a name that is not configured are not counted, and the series of a
+configuration removed from the source are removed.
 
 ## Kubernetes
 

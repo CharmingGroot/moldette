@@ -1,5 +1,5 @@
 //! `moldette-sidecar`, which runs configurations over records sent to it
-//! over HTTP (#103, #122).
+//! over HTTP (#103, #122, #135).
 
 mod budget;
 mod load;
@@ -7,10 +7,11 @@ mod metrics;
 mod pool;
 mod process;
 mod server;
+mod source;
 mod state;
 mod targets;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::ffi::OsString;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
@@ -22,13 +23,12 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use hyper::header::HeaderValue;
-use moldette::Pipeline;
 use moldette::framing::Framer;
 
 use metrics::{ConfigMetrics, Metrics};
+use source::Source;
 use state::{Limits, State};
-use targets::{Target, Targets};
+use targets::{Named, Target, Targets};
 
 // The static container image links musl, whose allocator serializes threads.
 #[global_allocator]
@@ -37,6 +37,7 @@ static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 const USAGE: &str = "\
 Usage: moldette-sidecar [options] <config>
        moldette-sidecar [options] <name>=<config>...
+       moldette-sidecar [options] --config-source <url> [<name>=<config>...]
 
 Runs configurations over records sent over HTTP.
 
@@ -49,9 +50,14 @@ Endpoints:
                            `record` and a `message`. The response header
                            `moldette-config-digest` names the configuration.
   POST /v1/process/<name>  The same with the configuration of that name
+  POST /v1/check           Check the configuration in the request body,
+                           YAML or with `?format=json` JSON, without running
+                           it: 200 with its digest and warnings, or 422 with
+                           its errors
   GET /healthz             200 while the process runs
   GET /readyz              200 once the configurations are loaded and the
-                           address is open
+                           address is open; with --config-source, once the
+                           source has been read
 
 Options (an option and its value may also be joined with `=`, as in
 `--threads=4`):
@@ -88,10 +94,25 @@ Options (an option and its value may also be joined with `=`, as in
                           writing the last response [default: 30]
   --max-requests <n>      Requests processed at once; more are answered with
                           503 [default: 16]
+  --config-source <url>   An http URL that lists named configurations as
+                          {\"configs\": [{\"name\", \"format\", \"body\"}]}, where
+                          `format` is `yaml` or `json` and `body` the text of
+                          the configuration; an entry may also hold
+                          `records` and `record_start`. The list is read
+                          again at each interval; a changed configuration is
+                          built and replaces the one of its name, one that
+                          fails to build keeps the previous one, and one no
+                          longer listed is removed. Configurations given as
+                          files are not replaced
+  --config-poll <seconds> Interval between reads of the configuration
+                          source [default: 5]
+  --config-source-max-bytes <n>
+                          Largest list the configuration source may send
+                          [default: 16777216]
 
 A configuration file whose name ends in `.json` is read as JSON, any other as
 YAML. Only built-in formats and ops are available. The configurations share
-the threads and the limits, and a changed configuration takes effect on
+the threads and the limits, and a changed configuration file takes effect on
 restart. SIGTERM stops accepting connections and waits for the requests in
 progress.";
 
@@ -102,6 +123,8 @@ const DEFAULT_MAX_RECORD_BYTES: usize = 1 << 20;
 const DEFAULT_MAX_BUFFER_BYTES: NonZeroUsize = NonZeroUsize::new(16 << 20).unwrap();
 const DEFAULT_TIMEOUT_SECONDS: NonZeroU64 = NonZeroU64::new(30).unwrap();
 const DEFAULT_MAX_REQUESTS: NonZeroUsize = NonZeroUsize::new(16).unwrap();
+const DEFAULT_CONFIG_POLL_SECONDS: NonZeroU64 = NonZeroU64::new(5).unwrap();
+const DEFAULT_CONFIG_SOURCE_MAX_BYTES: usize = 16 << 20;
 const IO_THREADS: usize = 2;
 
 struct Settings {
@@ -113,6 +136,7 @@ struct Settings {
     record_starts: Vec<String>,
     max_record_bytes: usize,
     limits: Limits,
+    source: Option<Source>,
 }
 
 /// A configuration on the command line: `<config>`, or `<name>=<config>`.
@@ -138,8 +162,12 @@ fn main() -> ExitCode {
         Err(code) => return code,
     };
     let metrics = Metrics::new();
-    let targets = match config_args(&args).and_then(|configs| targets(configs, &settings, &metrics))
-    {
+    let configs = match config_args(&args, settings.source.is_some()) {
+        Ok(configs) => configs,
+        Err(code) => return code,
+    };
+    let files: HashSet<String> = configs.iter().filter_map(|c| c.name.clone()).collect();
+    let targets = match targets(configs, &settings, &metrics) {
         Ok(targets) => targets,
         Err(code) => return code,
     };
@@ -188,6 +216,7 @@ fn main() -> ExitCode {
             targets,
             metrics,
             settings.limits,
+            settings.source.is_none(),
         ));
         eprintln!(
             "moldette-sidecar {} listening on {address}",
@@ -201,6 +230,15 @@ fn main() -> ExitCode {
             .map(tokio::net::TcpListener::local_addr)
         {
             eprintln!("moldette-sidecar metrics on {address}");
+        }
+        if let Some(source) = settings.source {
+            eprintln!(
+                "moldette-sidecar reads configurations from {} every {} seconds",
+                source.uri,
+                source.interval.as_secs()
+            );
+            let poll = source::poll(source, Arc::clone(&state), files, settings.max_record_bytes);
+            tokio::spawn(poll);
         }
         server::serve(listener, health, metrics_listener, state).await;
         eprintln!("moldette-sidecar stopped");
@@ -221,7 +259,25 @@ fn settings(args: &mut Vec<OsString>) -> Result<Settings, ExitCode> {
     let max_buffer_bytes = option("--max-buffer-bytes")?;
     let timeout = option("--timeout")?;
     let max_requests = option("--max-requests")?;
+    let config_source = option("--config-source")?;
+    let config_poll = option("--config-poll")?;
+    let config_source_max_bytes = option("--config-source-max-bytes")?;
     let available = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
+    let source = match config_source {
+        Some(url) => {
+            let interval = parse(config_poll, DEFAULT_CONFIG_POLL_SECONDS)?;
+            let max_bytes = parse(config_source_max_bytes, DEFAULT_CONFIG_SOURCE_MAX_BYTES)?;
+            let interval = Duration::from_secs(interval.get());
+            Some(
+                Source::new(&url, interval, max_bytes)
+                    .map_err(|message| argument_error(&message))?,
+            )
+        }
+        None if config_poll.is_some() || config_source_max_bytes.is_some() => {
+            return Err(usage_error());
+        }
+        None => None,
+    };
     Ok(Settings {
         listen: parse(listen, DEFAULT_LISTEN)?,
         health_listen: health_listen
@@ -240,6 +296,7 @@ fn settings(args: &mut Vec<OsString>) -> Result<Settings, ExitCode> {
             timeout: Duration::from_secs(parse(timeout, DEFAULT_TIMEOUT_SECONDS)?.get()),
             max_requests: parse(max_requests, DEFAULT_MAX_REQUESTS)?.get(),
         },
+        source,
     })
 }
 
@@ -284,7 +341,9 @@ fn take_options(args: &mut Vec<OsString>, name: &str) -> Result<Vec<String>, ()>
     Ok(values)
 }
 
-fn config_args(args: &[OsString]) -> Result<Vec<ConfigArg>, ExitCode> {
+/// The configurations given as files; with a configuration source, only
+/// named ones, and none at all is allowed.
+fn config_args(args: &[OsString], source: bool) -> Result<Vec<ConfigArg>, ExitCode> {
     let args: Vec<&str> = args
         .iter()
         .map(|arg| arg.to_str())
@@ -293,12 +352,17 @@ fn config_args(args: &[OsString]) -> Result<Vec<ConfigArg>, ExitCode> {
     if let [path] = args.as_slice()
         && !path.contains('=')
     {
+        if source {
+            return Err(argument_error(
+                "--config-source runs named configurations: give files as <name>=<config>",
+            ));
+        }
         return Ok(vec![ConfigArg {
             name: None,
             path: PathBuf::from(path),
         }]);
     }
-    if args.is_empty() {
+    if args.is_empty() && !source {
         return Err(usage_error());
     }
     let mut configs: Vec<ConfigArg> = Vec::with_capacity(args.len());
@@ -325,7 +389,7 @@ fn config_args(args: &[OsString]) -> Result<Vec<ConfigArg>, ExitCode> {
     Ok(configs)
 }
 
-fn is_name(name: &str) -> bool {
+pub(crate) fn is_name(name: &str) -> bool {
     !name.is_empty()
         && name
             .bytes()
@@ -377,24 +441,12 @@ fn targets(
     }
     Ok(match unnamed {
         Some(target) => Targets::Unnamed(target),
-        None => Targets::Named(named),
+        None => Targets::Named(Named::new(named)),
     })
 }
 
 fn target(path: &Path, framer: Framer, metrics: ConfigMetrics) -> Result<Target, ExitCode> {
-    let specs = load::specs(path)?;
-    let fail = |message: &dyn std::fmt::Display| {
-        eprintln!("error: {}: {message}", path.display());
-        ExitCode::FAILURE
-    };
-    let pipeline = Pipeline::from_specs(&specs).map_err(|err| fail(&err))?;
-    let digest = HeaderValue::from_str(specs.digest()).map_err(|err| fail(&err))?;
-    Ok(Target {
-        pipeline: Arc::new(pipeline),
-        framer,
-        digest,
-        metrics,
-    })
+    Ok(Target::new(load::file(path)?, framer, metrics))
 }
 
 /// Splits the values of an option given as `<value>` for every configuration

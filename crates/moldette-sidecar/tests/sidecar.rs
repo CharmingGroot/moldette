@@ -1,7 +1,8 @@
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::TcpStream;
+use std::net::{TcpListener, TcpStream};
 use std::process::{Child, ChildStderr, Command, Stdio};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -763,4 +764,284 @@ fn stops_reading_the_body_while_the_response_is_not_read() {
         }
     }
     assert!(sent < total / 2, "{sent} of {total} bytes were read");
+}
+
+/// A configuration source: an HTTP server that answers every request with
+/// its list, or 304 to a request that names the list's ETag.
+struct ConfigSource {
+    url: String,
+    state: Arc<Mutex<SourceState>>,
+}
+
+struct SourceState {
+    /// The list, or `None` to answer 500.
+    list: Option<String>,
+    version: usize,
+    requests: usize,
+    not_modified: usize,
+}
+
+impl ConfigSource {
+    fn start(list: Option<serde_json::Value>) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("source listens");
+        let url = format!("http://{}/configs", listener.local_addr().expect("address"));
+        let state = Arc::new(Mutex::new(SourceState {
+            list: list.map(|list| list.to_string()),
+            version: 1,
+            requests: 0,
+            not_modified: 0,
+        }));
+        let serving = Arc::clone(&state);
+        thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { continue };
+                let mut reader = BufReader::new(stream.try_clone().expect("stream clone"));
+                let mut if_none_match = None;
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                        break;
+                    }
+                    if let Some(value) = line.to_ascii_lowercase().strip_prefix("if-none-match:") {
+                        if_none_match = Some(value.trim().to_owned());
+                    }
+                }
+                let mut state = serving.lock().expect("source state");
+                state.requests += 1;
+                let etag = format!("\"v{}\"", state.version);
+                let reply = match &state.list {
+                    None => "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_owned(),
+                    Some(_) if if_none_match.as_deref() == Some(etag.as_str()) => {
+                        state.not_modified += 1;
+                        "HTTP/1.1 304 Not Modified\r\nConnection: close\r\n\r\n".to_owned()
+                    }
+                    Some(list) => format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nETag: {etag}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{list}",
+                        list.len()
+                    ),
+                };
+                drop(state);
+                let _ = stream.write_all(reply.as_bytes());
+            }
+        });
+        Self { url, state }
+    }
+
+    fn set(&self, list: serde_json::Value) {
+        let mut state = self.state.lock().expect("source state");
+        state.list = Some(list.to_string());
+        state.version += 1;
+    }
+
+    /// Waits for `reads` more requests to the source.
+    fn wait_for_reads(&self, reads: usize) {
+        let start = self.state.lock().expect("source state").requests;
+        eventually("reads of the source", || {
+            self.state.lock().expect("source state").requests >= start + reads
+        });
+    }
+}
+
+fn eventually(what: &str, mut done: impl FnMut() -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !done() {
+        assert!(Instant::now() < deadline, "no {what}");
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn source_entry(name: &str, config: &str, records: Option<&str>) -> serde_json::Value {
+    let mut entry = serde_json::json!({
+        "name": name,
+        "format": "yaml",
+        "body": fs::read_to_string(config).expect("configuration"),
+    });
+    if let Some(records) = records {
+        entry["records"] = records.into();
+    }
+    entry
+}
+
+fn start_with_source(source: &ConfigSource, args: &[&str]) -> Sidecar {
+    let args = [
+        &["--config-source", source.url.as_str(), "--config-poll", "1"][..],
+        args,
+    ]
+    .concat();
+    Sidecar::start_with(&args)
+}
+
+#[test]
+fn configurations_from_the_source_are_loaded_replaced_and_removed() {
+    let source = ConfigSource::start(Some(serde_json::json!({
+        "configs": [source_entry("orders", CONFIG, Some("json"))]
+    })));
+    let sidecar = start_with_source(&source, &[]);
+    eventually("readiness", || sidecar.get("/readyz").status == 200);
+    let (array, lines) = orders_json();
+    let reply = sidecar.post_to("/v1/process/orders", array.as_bytes());
+    assert_eq!(reply.text(), expected(&lines));
+    assert_eq!(
+        reply.header("moldette-config-digest"),
+        Some(specs(CONFIG).digest())
+    );
+    source.wait_for_reads(1);
+    assert!(source.state.lock().expect("source state").not_modified > 0);
+
+    source.set(serde_json::json!({
+        "configs": [source_entry("orders", EXPORT_CONFIG, None)]
+    }));
+    let csv = fs::read_to_string(EXPORT_DATA).expect("export data");
+    eventually("the replaced configuration", || {
+        sidecar
+            .post_to("/v1/process/orders", csv.as_bytes())
+            .header("moldette-config-digest")
+            == Some(specs(EXPORT_CONFIG).digest())
+    });
+    let reply = sidecar.post_to("/v1/process/orders", csv.as_bytes());
+    assert_eq!(reply.text(), expected_with(EXPORT_CONFIG, &csv));
+
+    source.set(serde_json::json!({ "configs": [] }));
+    eventually("the removal", || {
+        sidecar.post_to("/v1/process/orders", b"{}").status == 404
+    });
+}
+
+#[test]
+fn a_configuration_that_fails_to_build_keeps_the_previous_one() {
+    let source = ConfigSource::start(Some(serde_json::json!({
+        "configs": [source_entry("orders", CONFIG, None)]
+    })));
+    let mut sidecar = start_with_source(&source, &["--metrics-listen", "127.0.0.1:0"]);
+    let metrics = sidecar.next_address("metrics on ");
+    eventually("readiness", || sidecar.get("/readyz").status == 200);
+    source.set(serde_json::json!({
+        "configs": [{"name": "orders", "format": "yaml", "body": "schemas: [}"}]
+    }));
+    let scrape = || {
+        send(
+            &metrics,
+            b"GET /metrics HTTP/1.1\r\nHost: sidecar\r\nConnection: close\r\n\r\n",
+        )
+        .text()
+    };
+    eventually("the failed build", || {
+        scrape().lines().any(|line| {
+            line == "moldette_config_builds_total{config=\"orders\",result=\"error\"} 1"
+        })
+    });
+    let input = orders();
+    let reply = sidecar.post_to("/v1/process/orders", input.as_bytes());
+    assert_eq!(reply.text(), expected(&input));
+    let text = scrape();
+    for line in [
+        "moldette_config_builds_total{config=\"orders\",result=\"ok\"} 1",
+        "moldette_config_source_requests_total{result=\"ok\"} 2",
+    ] {
+        assert!(text.lines().any(|l| l == line), "{line} in\n{text}");
+    }
+}
+
+#[test]
+fn readiness_waits_for_the_first_list() {
+    let source = ConfigSource::start(None);
+    let sidecar = start_with_source(&source, &[]);
+    source.wait_for_reads(1);
+    let ready = sidecar.get("/readyz");
+    assert_eq!((ready.status, ready.text().as_str()), (503, "not ready\n"));
+    assert_eq!(sidecar.get("/healthz").status, 200);
+    source.set(serde_json::json!({
+        "configs": [source_entry("orders", CONFIG, None)]
+    }));
+    eventually("readiness", || sidecar.get("/readyz").status == 200);
+    let input = orders();
+    let reply = sidecar.post_to("/v1/process/orders", input.as_bytes());
+    assert_eq!(reply.text(), expected(&input));
+}
+
+#[test]
+fn files_given_at_start_are_not_replaced_by_the_source() {
+    let source = ConfigSource::start(Some(serde_json::json!({
+        "configs": [
+            source_entry("orders", EXPORT_CONFIG, None),
+            source_entry("export", EXPORT_CONFIG, None),
+        ]
+    })));
+    let orders = format!("orders={CONFIG}");
+    let sidecar = start_with_source(&source, &[&orders]);
+    eventually("readiness", || sidecar.get("/readyz").status == 200);
+    let input = orders_json().1;
+    let reply = sidecar.post_to("/v1/process/orders", input.as_bytes());
+    assert_eq!(
+        reply.header("moldette-config-digest"),
+        Some(specs(CONFIG).digest())
+    );
+    let csv = fs::read_to_string(EXPORT_DATA).expect("export data");
+    let reply = sidecar.post_to("/v1/process/export", csv.as_bytes());
+    assert_eq!(reply.text(), expected_with(EXPORT_CONFIG, &csv));
+    source.set(serde_json::json!({ "configs": [] }));
+    eventually("the removal", || {
+        sidecar.post_to("/v1/process/export", b"{}").status == 404
+    });
+    let reply = sidecar.post_to("/v1/process/orders", input.as_bytes());
+    assert_eq!(reply.status, 200);
+}
+
+#[test]
+fn check_reports_a_configuration_without_running_it() {
+    let sidecar = Sidecar::start(&[]);
+    let yaml = fs::read_to_string(CONFIG).expect("configuration");
+    let valid = sidecar.post_to("/v1/check", yaml.as_bytes());
+    assert_eq!(valid.status, 200);
+    let body: serde_json::Value = serde_json::from_slice(&valid.body).expect("JSON");
+    assert_eq!(body["digest"], specs(CONFIG).digest());
+    let invalid = sidecar.post_to("/v1/check", b"parser: {format: json, separator: x}");
+    assert_eq!(invalid.status, 422);
+    let body: serde_json::Value = serde_json::from_slice(&invalid.body).expect("JSON");
+    assert_eq!(body["digest"], serde_json::Value::Null);
+    assert_eq!(body["messages"][0]["severity"], "error");
+    let json = sidecar.post_to("/v1/check?format=json", b"{\"parser\": 1}");
+    assert_eq!(json.status, 422);
+    assert_eq!(sidecar.post_to("/v1/check?format=toml", b"").status, 400);
+    assert_eq!(sidecar.get("/v1/check").status, 405);
+}
+
+#[test]
+fn the_configuration_source_options_are_checked_before_listening() {
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_moldette-sidecar"))
+            .args(args)
+            .output()
+            .expect("the sidecar runs")
+    };
+    for (args, message) in [
+        (
+            vec!["--config-source", "https://example.com/configs"],
+            "error: --config-source: only http URLs are supported",
+        ),
+        (
+            vec!["--config-source", "http://127.0.0.1:1/configs", CONFIG],
+            "error: --config-source runs named configurations: give files as <name>=<config>",
+        ),
+    ] {
+        let output = run(&args);
+        assert_eq!(output.status.code(), Some(2), "{args:?}");
+        assert_eq!(String::from_utf8_lossy(&output.stderr).trim_end(), message);
+    }
+    for args in [
+        vec!["--config-poll", "1", CONFIG],
+        vec![
+            "--config-source",
+            "http://127.0.0.1:1/c",
+            "--config-poll",
+            "0",
+        ],
+    ] {
+        let output = run(&args);
+        assert_eq!(output.status.code(), Some(2), "{args:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).starts_with("Usage: moldette-sidecar"),
+            "{args:?}"
+        );
+    }
 }
