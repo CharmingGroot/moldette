@@ -6,12 +6,13 @@ use moldette_config::{Config, Registry, Specs};
 use moldette_core::Response;
 use moldette_spec::json::JsonResponse;
 
-const DOCUMENTS: [(&str, &str); 5] = [
+const DOCUMENTS: [(&str, &str); 6] = [
     (
         "docs/CONFIGURATION.md",
         include_str!("../../../docs/CONFIGURATION.md"),
     ),
     ("README.md", include_str!("../../../README.md")),
+    ("README.ko.md", include_str!("../../../README.ko.md")),
     (
         "docs/TROUBLESHOOTING.md",
         include_str!("../../../docs/TROUBLESHOOTING.md"),

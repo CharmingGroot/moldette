@@ -1,5 +1,7 @@
 # moldette
 
+English | [한국어](README.ko.md)
+
 moldette turns raw records into records of the schema you declare. You
 describe, in one YAML or JSON file, how to read a record (JSON, CSV and other
 delimited text, log lines read with a regular expression, `key=value` pairs),

@@ -54,6 +54,7 @@ LOWERING_TESTS = "--test lowering"
 # filters; a key ending in `/` covers a directory.
 EXAMPLE_TESTS = {
     "README.md": ("moldette-config", "--test docs", None),
+    "README.ko.md": ("moldette-config", "--test docs", None),
     "docs/CONFIGURATION.md": ("moldette-config", "--test docs", None),
     "docs/SIDECAR.md": ("moldette-config", "--test docs", None),
     "docs/TROUBLESHOOTING.md": ("moldette-config", "--test docs", None),
